@@ -1,0 +1,41 @@
+:root {
+  /* Fonts */
+  --font-display: Spline Sans, Inter, ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-rounded: 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
+
+  /* Primary Brand Colors */
+  --primary: #eab308;
+  --primary-light: #fde047;
+  --primary-dark: #ca8a04;
+
+  /* Base Colors */
+  --text: #1c1917;
+  --white: #ffffff;
+  --black: #000000;
+
+  /* Chat Bubbles */
+  --my-bubble: #dcf8c6;
+  --other-bubble: #ffffff;
+
+  /* Status Colors */
+  --green: #22c55e;
+  --red: #ef4444;
+
+  /* Backgrounds */
+  --background: #fafaf9;
+  --chat-bg: #f5f5f4;
+
+  /* Neutrals */
+  --neutral-50: #fafaf9;
+  --neutral-100: #f5f5f4;
+  --neutral-200: #e7e5e4;
+  --neutral-300: #d6d3d1;
+  --neutral-400: #a8a29e;
+  --neutral-500: #78716c;
+  --neutral-600: #57534e;
+  --neutral-700: #44403c;
+  --neutral-800: #292524;
+  --neutral-900: #1c1917;
+}
