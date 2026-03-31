@@ -1,10 +1,10 @@
 {
   "expo": {
-    "name": "chatapp",
-    "slug": "chatapp",
+    "name": "talkup",
+    "slug": "talkup-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/splashImage.png",
     "scheme": "chatapp",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.hof.talkupapp"
     },
     "web": {
       "output": "static",
@@ -39,6 +40,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "392fb3ab-24c4-49f1-9a95-d5a04c7895b1"
+      }
     }
   }
 }

@@ -322,7 +322,7 @@ export const THEMES: ChatTheme[] = [
     theirMetaColor: "rgba(30, 58, 138, 0.5)",
     dateLabelBg: "rgba(255, 215, 0, 0.2)",
     dateLabelText: "#FFFFFF",
-    sendBtnBg: "#FFD700",
+    sendBtnBg: "#1E3A8A",
     sendBtnIcon: "#E34234",
   },
 
