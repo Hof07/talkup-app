@@ -8,9 +8,10 @@ const Colors = {
 
   myBubble: "#DCF8C6",
   otherBubble: "#ffffff",
-
+  primaryFaded: "rgba(255,214,0,0.12)",
   green: "#22c55e",
   red: "#ef4444",
+  danger: "#E53935",
 
   // Backgrounds
   background: "#fafaf9",
