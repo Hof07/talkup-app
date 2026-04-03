@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View,
   TextInput,
@@ -8,11 +8,20 @@ import {
   Platform,
   NativeSyntheticEvent,
   TextInputContentSizeChangeEventData,
+  Animated,
 } from "react-native";
-import { Send, ImagePlus, Sticker } from "lucide-react-native";
-import { ChatTheme, THEMES } from "../../../lib/themes";
+import {
+  Send,
+  ImagePlus,
+  Sticker,
+  Sparkles,
+  Mic,
+  Smile,
+} from "lucide-react-native";
+import { ChatTheme } from "../../../lib/themes";
 import { Stickers } from "../stickers";
 import { StickerPicker } from "../StickerPicker";
+import { fixGrammar } from "@/app/lib/grammarFix";
 
 interface Props {
   value: string;
@@ -48,11 +57,35 @@ export default function InputBar({
   userId,
 }: Props) {
   const [stickerVisible, setStickerVisible] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const animValue = useRef(new Animated.Value(0)).current;
 
   const resolvedInputHeight = Math.max(
     MIN_INPUT_HEIGHT,
     Math.min(MAX_INPUT_HEIGHT, inputHeight)
   );
+
+  useEffect(() => {
+    Animated.spring(animValue, {
+      toValue: value.trim() ? 1 : 0,
+      useNativeDriver: true,
+      friction: 7,
+      tension: 80,
+    }).start();
+  }, [value]);
+
+  const handleFix = async () => {
+    if (!value.trim() || fixing) return;
+    setFixing(true);
+    try {
+      const fixed = await fixGrammar(value);
+      onChangeText(fixed);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setFixing(false);
+    }
+  };
 
   return (
     <>
@@ -83,6 +116,7 @@ export default function InputBar({
             },
           ]}
         >
+          {/* Left - Image Pick Button */}
           <TouchableOpacity
             onPress={onImagePick}
             style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
@@ -91,6 +125,7 @@ export default function InputBar({
             <ImagePlus size={20} color={theme.sendBtnBg} />
           </TouchableOpacity>
 
+          {/* Middle - Text Input */}
           <View style={s.podInputBox}>
             <TextInput
               style={[
@@ -109,38 +144,112 @@ export default function InputBar({
               onChangeText={onChangeText}
               onContentSizeChange={onContentSizeChange}
               cursorColor={theme.sendBtnBg}
+              selectionHandleColor={theme.sendBtnBg}
+              selectionColor={`${theme.sendBtnBg}40`}
             />
           </View>
 
-          <TouchableOpacity
-            onPress={() => setStickerVisible(true)}
-            style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
-            activeOpacity={0.7}
-          >
-            <Sticker size={20} color={theme.sendBtnBg} />
-          </TouchableOpacity>
+          {/* Right Side - Icons */}
+          <View style={s.rightIcons}>
 
-          <TouchableOpacity
-            onPress={onSend}
-            disabled={!value.trim() || sending}
-            activeOpacity={0.7}
-            style={[
-              s.sendBtn,
-              {
-                backgroundColor: value.trim() ? theme.sendBtnBg : "#e5e5e5",
-              },
-            ]}
-          >
-            {sending ? (
-              <ActivityIndicator size="small" color={theme.sendBtnIcon} />
-            ) : (
-              <Send
-                size={19}
-                color={value.trim() ? theme.sendBtnIcon : "#aaa"}
-                strokeWidth={2.5}
-              />
-            )}
-          </TouchableOpacity>
+            {/* Sticker + Mic + Smile - hide when typing */}
+            <Animated.View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                opacity: animValue.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 0],
+                }),
+                transform: [
+                  {
+                    scale: animValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [1, 0.5],
+                    }),
+                  },
+                ],
+                position: "absolute",
+                right: 0,
+                pointerEvents: value.trim() ? "none" : "auto",
+              }}
+            >
+              <TouchableOpacity
+                onPress={() => setStickerVisible(true)}
+                style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
+                activeOpacity={0.7}
+              >
+                <Sticker size={20} color={theme.sendBtnBg} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {}}
+                style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
+                activeOpacity={0.7}
+              >
+                <Mic size={20} color={theme.sendBtnBg} />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => {}}
+                style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
+                activeOpacity={0.7}
+              >
+                <Smile size={20} color={theme.sendBtnBg} />
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Sparkles + Send - show when typing */}
+            <Animated.View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                opacity: animValue,
+                transform: [
+                  {
+                    scale: animValue.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.5, 1],
+                    }),
+                  },
+                ],
+                position: "absolute",
+                right: 0,
+                pointerEvents: value.trim() ? "auto" : "none",
+              }}
+            >
+              {/* Grammar Fix */}
+              <TouchableOpacity
+                onPress={handleFix}
+                disabled={fixing}
+                activeOpacity={0.7}
+                style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
+              >
+                {fixing ? (
+                  <ActivityIndicator size="small" color={theme.sendBtnBg} />
+                ) : (
+                  <Sparkles size={20} color={theme.sendBtnBg} />
+                )}
+              </TouchableOpacity>
+
+              {/* Send */}
+              <TouchableOpacity
+                onPress={onSend}
+                disabled={sending}
+                activeOpacity={0.7}
+                style={[s.sendBtn, { backgroundColor: theme.sendBtnBg }]}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color={theme.sendBtnIcon} />
+                ) : (
+                  <Send size={19} color={theme.sendBtnIcon} strokeWidth={2.5} />
+                )}
+              </TouchableOpacity>
+            </Animated.View>
+
+          </View>
         </View>
       </View>
     </>
@@ -155,7 +264,7 @@ const s = StyleSheet.create({
   },
   podContainer: {
     flexDirection: "row",
-    alignItems: "flex-end",
+    alignItems: "center",
     borderRadius: 30,
     paddingLeft: 8,
     paddingRight: 8,
@@ -180,12 +289,21 @@ const s = StyleSheet.create({
     justifyContent: "center",
     paddingHorizontal: 2,
   },
+  rightIcons: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    // width fixed to fit 3 icons so layout doesn't jump
+    width: 3 * 40 + 2 * 6, // 3 icons + 2 gaps
+    marginBottom: 2,
+  },
   textInput: {
     fontSize: 15,
     lineHeight: LINE_HEIGHT,
     fontFamily: "Outfit_400Regular",
     minHeight: MIN_INPUT_HEIGHT,
     maxHeight: MAX_INPUT_HEIGHT,
+    fontWeight: "500",
     paddingTop: 10,
     paddingBottom: 10,
     paddingHorizontal: 8,
