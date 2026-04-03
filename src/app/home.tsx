@@ -28,7 +28,6 @@ import { RequestRow } from "./components/RequestRow";
 import { EmptyState } from "./components/EmptyState";
 import { SearchBar } from "./components/SearchBar";
 import { DeleteModal } from "./components/DeleteModal";
-// import type { Friend, Tab } from "./types";
 import { useHomeData } from "./home_compo/useHomeData";
 import { getSecretKey, hasSecretKey } from "./home_compo/Hiddenchats";
 import { Friend, Tab, TALKUP_USER_ID } from "./home_compo/types";

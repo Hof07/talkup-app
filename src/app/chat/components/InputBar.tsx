@@ -10,7 +10,7 @@ import {
   TextInputContentSizeChangeEventData,
 } from "react-native";
 import { Send, ImagePlus, Sticker } from "lucide-react-native";
-import { ChatTheme } from "../../../lib/themes";
+import { ChatTheme, THEMES } from "../../../lib/themes";
 import { Stickers } from "../stickers";
 import { StickerPicker } from "../StickerPicker";
 
@@ -108,6 +108,7 @@ export default function InputBar({
               value={value}
               onChangeText={onChangeText}
               onContentSizeChange={onContentSizeChange}
+              cursorColor={theme.sendBtnBg}
             />
           </View>
 
