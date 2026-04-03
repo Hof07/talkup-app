@@ -1,39 +1,26 @@
-// ─── components/FriendRow.tsx ─────────────────────────────────────────────────
+// ─── components/TalkUpRow.tsx ─────────────────────────────────────────────────
 
 import { useRef, useState } from "react";
 import {
   Animated,
-  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { router } from "expo-router";
-import { EyeOff } from "lucide-react-native";
+import { BadgeCheck, Megaphone } from "lucide-react-native";
 import Colors from "../constants/colors";
-// import { isOnline, formatLastSeen } from "../utils";
-// import { Friend } from "../types";
-import { TalkUpRow } from "./TalkUpRow";
 import { Friend } from "../home_compo/types";
-import { formatLastSeen, isOnline } from "../home_compo/utils";
+// import { Friend } from "./types";
 
 interface Props {
-  item:        Friend;
-  onLongPress: () => void;
+  item: Friend;
 }
 
-export const FriendRow = ({ item, onLongPress }: Props) => {
-  if (item.isTalkUp) return <TalkUpRow item={item} />;
-  return <RegularFriendRow item={item} onLongPress={onLongPress} />;
-};
-
-// ── Regular friend row ────────────────────────────────────────────────────────
-
-const RegularFriendRow = ({ item, onLongPress }: Props) => {
-  const online    = isOnline(item.last_seen);
+export const TalkUpRow = ({ item }: Props) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
-  const [pressed, setPressed] = useState(false);   // bg color via state, not native driver
+  const [pressed, setPressed] = useState(false);   // drives bg color via state
 
   const onPressIn = () => {
     setPressed(true);
@@ -60,7 +47,7 @@ const RegularFriendRow = ({ item, onLongPress }: Props) => {
       style={[
         styles.rowWrap,
         { transform: [{ scale: scaleAnim }] },
-        pressed && styles.rowWrapPressed,
+        pressed && styles.rowWrapPressed,   // bg swap via state — no native driver conflict
       ]}
     >
       <TouchableOpacity
@@ -68,63 +55,33 @@ const RegularFriendRow = ({ item, onLongPress }: Props) => {
         activeOpacity={1}
         onPressIn={onPressIn}
         onPressOut={onPressOut}
-        onLongPress={onLongPress}
-        delayLongPress={400}
-        onPress={() =>
-          router.push({
-            pathname: "/chat/[id]",
-            params: {
-              id:         item.id,
-              username:   item.username,
-              avatar_url: item.avatar_url ?? "",
-            },
-          })
-        }
+        onPress={() => router.push({ pathname: "/chat/[id]", params: { id: item.id, username: "TalkUp", avatar_url: "" } })}
       >
         {/* Avatar */}
-        <View style={styles.avatarWrapper}>
-          {item.avatar_url ? (
-            <Image source={{ uri: item.avatar_url }} style={styles.avatar} />
-          ) : (
-            <View style={styles.avatarPlaceholder}>
-              <Text style={styles.avatarInitial}>
-                {item.username.charAt(0).toUpperCase()}
-              </Text>
-            </View>
-          )}
-          <View
-            style={[
-              styles.onlineDot,
-              { backgroundColor: online ? Colors.green : Colors.neutral400 },
-            ]}
-          />
+        <View style={styles.avatarWrap}>
+          <View style={styles.avatar}>
+            <Megaphone size={24} color={Colors.black} />
+          </View>
+          <View style={[styles.dot, { backgroundColor: Colors.green }]} />
         </View>
 
         {/* Info */}
         <View style={styles.info}>
           <View style={styles.topRow}>
             <View style={styles.nameRow}>
-              <Text style={styles.name}>{item.username}</Text>
-              {item.isHidden && (
-                <View style={styles.hiddenBadge}>
-                  <EyeOff size={10} color={Colors.neutral500} />
-                  <Text style={styles.hiddenBadgeText}>hidden</Text>
-                </View>
-              )}
+              <Text style={styles.name}>TalkUp</Text>
+              <BadgeCheck size={15} color={Colors.primary} fill={Colors.primary} />
+              <View style={styles.officialBadge}>
+                <Text style={styles.officialBadgeText}>Official</Text>
+              </View>
             </View>
             <Text style={styles.time}>{item.last_message_time}</Text>
           </View>
 
           <View style={styles.bottomRow}>
-            {item.last_message ? (
-              <Text style={styles.lastMessage} numberOfLines={1}>
-                {item.last_message}
-              </Text>
-            ) : (
-              <Text style={[styles.lastMessage, styles.lastMessageMuted]}>
-                {online ? "online" : formatLastSeen(item.last_seen)}
-              </Text>
-            )}
+            <Text style={styles.preview} numberOfLines={1}>
+              {item.last_message || "Updates, news & announcements"}
+            </Text>
             {!!item.unread_count && item.unread_count > 0 && (
               <View style={styles.badge}>
                 <Text style={styles.badgeText}>{item.unread_count}</Text>
@@ -153,26 +110,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     gap: 14,
   },
-  avatarWrapper: { position: "relative" },
+  avatarWrap: { position: "relative" },
   avatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
-  },
-  avatarPlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.neutral200,
+    backgroundColor: Colors.primary,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarInitial: {
-    fontFamily: "Outfit_700Bold",
-    fontSize: 22,
-    color: Colors.neutral600,
-  },
-  onlineDot: {
+  dot: {
     position: "absolute",
     bottom: 2,
     right: 2,
@@ -192,26 +139,23 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 5,
   },
   name: {
     fontFamily: "Outfit_700Bold",
     fontSize: 16,
     color: Colors.text,
   },
-  hiddenBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 3,
-    backgroundColor: Colors.neutral200,
+  officialBadge: {
+    backgroundColor: Colors.primary,
     borderRadius: 6,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  hiddenBadgeText: {
-    fontFamily: "Outfit_400Regular",
+  officialBadgeText: {
+    fontFamily: "Outfit_600SemiBold",
     fontSize: 10,
-    color: Colors.neutral500,
+    color: Colors.black,
   },
   time: {
     fontFamily: "Outfit_400Regular",
@@ -223,21 +167,21 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  lastMessage: {
+  preview: {
     fontFamily: "Outfit_400Regular",
     fontSize: 13,
     color: Colors.neutral400,
     flex: 1,
     marginRight: 8,
   },
-  lastMessageMuted: { fontStyle: "italic" },
   badge: {
     backgroundColor: Colors.primary,
-    width: 22,
+    minWidth: 22,
     height: 22,
     borderRadius: 11,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 4,
   },
   badgeText: {
     fontFamily: "Outfit_700Bold",

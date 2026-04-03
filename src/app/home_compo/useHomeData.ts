@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { router, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Friend, FriendRequest } from "./types";
+import { Friend, FriendRequest, TALKUP_USER_ID } from "./types";
 import * as api from "./api";
 import * as hidden from "./Hiddenchats";
 
@@ -33,14 +33,14 @@ export const useHomeData = () => {
       const [currentUser, pending, rawFriends, hiddenIds] = await Promise.all([
         api.fetchCurrentUser(user.id, token),
         api.fetchPendingRequests(user.id, token),
-        api.fetchFriendsWithMessages(user.id, token),
+        api.fetchFriendsWithMessages(user.id, token),  // TalkUp already injected at [0]
         hidden.getHiddenIds(),
       ]);
 
-      // Tag each friend with isHidden
+      // Tag hidden — but never tag TalkUp as hidden
       const friendsWithHidden = rawFriends.map((f) => ({
         ...f,
-        isHidden: hiddenIds.includes(f.id),
+        isHidden: f.isTalkUp ? false : hiddenIds.includes(f.id),
       }));
 
       setCurrentUser(currentUser);
@@ -54,7 +54,7 @@ export const useHomeData = () => {
     }
   }, []);
 
-  // ── Focus refresh + last_seen ─────────────────────────────────────────────────
+  // ── Focus refresh ─────────────────────────────────────────────────────────────
 
   useFocusEffect(
     useCallback(() => {
@@ -80,21 +80,23 @@ export const useHomeData = () => {
     setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
   };
 
-  // ── Delete friend ────────────────────────────────────────────────────────────
+  // ── Delete friend — TalkUp cannot be deleted ─────────────────────────────────
 
   const handleDeleteFriend = async (friendId: string) => {
+    if (friendId === TALKUP_USER_ID) return;   // guard
     try {
       await api.deleteFriend(currentUserId, friendId, sessionData?.access_token);
-      await hidden.unhideChat(friendId); // clean up hidden list too
+      await hidden.unhideChat(friendId);
       setFriends((prev) => prev.filter((f) => f.id !== friendId));
     } catch (e) {
       console.error(e);
     }
   };
 
-  // ── Hide / unhide chat ───────────────────────────────────────────────────────
+  // ── Hide / unhide — TalkUp cannot be hidden ──────────────────────────────────
 
   const handleHideChat = async (friendId: string) => {
+    if (friendId === TALKUP_USER_ID) return;   // guard
     await hidden.hideChat(friendId);
     setFriends((prev) =>
       prev.map((f) => (f.id === friendId ? { ...f, isHidden: true } : f))

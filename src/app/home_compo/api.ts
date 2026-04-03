@@ -1,8 +1,12 @@
 // ─── api.ts ──────────────────────────────────────────────────────────────────
 
-import { Friend, FriendRequest } from "./types";
+import { Friend, FriendRequest, TALKUP_USER_ID } from "./types";
 import { formatTime } from "./utils";
-import { decryptMessage, generateChatKey } from "../../lib/crypto";
+import {
+  decryptMessage,
+  encryptMessage,
+  generateChatKey,
+} from "../../lib/crypto";
 
 const BASE = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
@@ -108,6 +112,104 @@ export const deleteFriend = async (
   );
 };
 
+// ── Upload image to Supabase Storage ─────────────────────────────────────────
+// Make sure you have a "broadcasts" bucket in Supabase Storage set to PUBLIC.
+
+export const uploadBroadcastImage = async (
+  uri: string,
+  token: string,
+): Promise<string> => {
+  const filename = `broadcast_${Date.now()}.jpg`;
+  const storageUrl = `${BASE}/storage/v1/object/broadcasts/${filename}`;
+
+  const response = await fetch(uri);
+  const blob = await response.blob();
+
+  const uploadRes = await fetch(storageUrl, {
+    method: "POST",
+    headers: {
+      apikey: KEY,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "image/jpeg",
+      "x-upsert": "true",
+    },
+    body: blob,
+  });
+
+  if (!uploadRes.ok) {
+    const err = await uploadRes.text();
+    throw new Error(`Image upload failed: ${err}`);
+  }
+
+  return `${BASE}/storage/v1/object/public/broadcasts/${filename}`;
+};
+
+export const fetchStats = async (
+  token: string
+): Promise<{
+  totalMessages: number;
+  totalUsers: number;
+  broadcastsSent: number;
+}> => {
+
+  const res = await fetch(`${BASE}/rest/v1/rpc/get_stats`, {
+    method: "POST",
+    headers: {
+      ...headers(token),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      talkup_id: TALKUP_USER_ID,
+    }),
+  });
+
+  const data = await res.json();
+
+  return {
+    totalMessages: data.totalMessages || 0,
+    totalUsers: data.totalUsers || 0,
+    broadcastsSent: data.broadcastsSent || 0,
+  };
+};
+// ── TalkUp row builder ────────────────────────────────────────────────────────
+
+const buildTalkUpRow = async (
+  userId: string,
+  token: string,
+): Promise<Friend> => {
+  const [msgRes, unreadRes] = await Promise.all([
+    fetch(
+      `${BASE}/rest/v1/messages?or=(and(sender_id.eq.${TALKUP_USER_ID},receiver_id.eq.${userId}),and(sender_id.eq.${userId},receiver_id.eq.${TALKUP_USER_ID}))&order=created_at.desc&limit=1&select=content,created_at`,
+      { headers: headers(token) },
+    ),
+    fetch(
+      `${BASE}/rest/v1/messages?sender_id=eq.${TALKUP_USER_ID}&receiver_id=eq.${userId}&is_read=eq.false&select=id`,
+      { headers: headers(token) },
+    ),
+  ]);
+
+  const [msgs, unread] = await Promise.all([msgRes.json(), unreadRes.json()]);
+  const lastMsg = msgs[0];
+  const chatKey = generateChatKey(userId, TALKUP_USER_ID);
+  const decrypted = lastMsg?.content
+    ? decryptMessage(lastMsg.content, chatKey)
+    : "";
+
+  return {
+    id: TALKUP_USER_ID,
+    username: "TalkUp",
+    avatar_url: null,
+    last_message: decrypted || "Updates, news & announcements",
+    last_message_time: lastMsg?.created_at
+      ? formatTime(lastMsg.created_at)
+      : "",
+    unread_count: unread?.length ?? 0,
+    last_seen: null,
+    isTalkUp: true,
+    isHidden: false,
+  };
+};
+
 // ── Friends + messages ────────────────────────────────────────────────────────
 
 export const fetchFriendsWithMessages = async (
@@ -119,17 +221,21 @@ export const fetchFriendsWithMessages = async (
     { headers: headers(token) },
   );
   const friendships = await frRes.json();
-  if (!friendships?.length) return [];
 
-  const friendIds = friendships.map((f: any) =>
-    f.sender_id === userId ? f.receiver_id : f.sender_id,
-  );
-
-  const fRes = await fetch(
-    `${BASE}/rest/v1/users?id=in.(${friendIds.join(",")})&select=id,username,avatar_url,last_seen`,
-    { headers: headers(token) },
-  );
-  const friendsData: Friend[] = await fRes.json();
+  const [talkUpRow, friendsData] = await Promise.all([
+    buildTalkUpRow(userId, token),
+    (async () => {
+      if (!friendships?.length) return [];
+      const friendIds = friendships.map((f: any) =>
+        f.sender_id === userId ? f.receiver_id : f.sender_id,
+      );
+      const fRes = await fetch(
+        `${BASE}/rest/v1/users?id=in.(${friendIds.join(",")})&select=id,username,avatar_url,last_seen`,
+        { headers: headers(token) },
+      );
+      return fRes.json() as Promise<Friend[]>;
+    })(),
+  ]);
 
   const enriched = await Promise.all(
     friendsData.map(async (friend) => {
@@ -143,7 +249,6 @@ export const fetchFriendsWithMessages = async (
           { headers: headers(token) },
         ),
       ]);
-
       const [msgs, unread] = await Promise.all([
         msgRes.json(),
         unreadRes.json(),
@@ -153,7 +258,6 @@ export const fetchFriendsWithMessages = async (
       const decryptedMsg = lastMsg?.content
         ? decryptMessage(lastMsg.content, chatKey)
         : "";
-
       return {
         ...friend,
         last_message: decryptedMsg,
@@ -165,5 +269,95 @@ export const fetchFriendsWithMessages = async (
     }),
   );
 
-  return enriched.sort((a, b) => (a.last_message_time ? -1 : 1));
+  const sorted = enriched.sort((a, b) => (a.last_message_time ? -1 : 1));
+  return [talkUpRow, ...sorted];
+};
+
+// ── Broadcast — text + optional image ────────────────────────────────────────
+// When image included, message is stored as: "IMAGE::<url>::<text>"
+
+export const broadcastMessage = async (
+  message: string,
+  token: string,
+  imageUrl?: string | null,
+  onProgress?: (sent: number, total: number) => void,
+): Promise<void> => {
+  const res = await fetch(
+    `${BASE}/rest/v1/users?id=neq.${TALKUP_USER_ID}&select=id`,
+    { headers: headers(token) },
+  );
+  const users: { id: string }[] = await res.json();
+  const total = users.length;
+  const BATCH = 10;
+  let sent = 0;
+
+  const fullMessage = imageUrl ? `IMAGE::${imageUrl}::${message}` : message;
+
+  for (let i = 0; i < users.length; i += BATCH) {
+    const batch = users.slice(i, i + BATCH);
+    await Promise.all(
+      batch.map((user) => {
+        const chatKey = generateChatKey(TALKUP_USER_ID, user.id);
+        const encrypted = encryptMessage(fullMessage, chatKey);
+        return fetch(`${BASE}/rest/v1/messages`, {
+          method: "POST",
+          headers: { ...jsonHeaders(token), Prefer: "return=minimal" },
+          body: JSON.stringify({
+            sender_id: TALKUP_USER_ID,
+            receiver_id: user.id,
+            content: encrypted,
+            is_read: false,
+            created_at: new Date().toISOString(),
+          }),
+        });
+      }),
+    );
+    sent += batch.length;
+    onProgress?.(sent, total);
+  }
+};
+
+// ── Broadcast history ─────────────────────────────────────────────────────────
+
+export const fetchBroadcastHistory = async (
+  token: string,
+  limit = 20,
+): Promise<
+  { content: string; created_at: string; id: string; imageUrl?: string }[]
+> => {
+  const res = await fetch(
+    `${BASE}/rest/v1/messages?sender_id=eq.${TALKUP_USER_ID}&order=created_at.desc&limit=${limit}&select=id,content,created_at,receiver_id`,
+    { headers: headers(token) },
+  );
+  const rows = await res.json();
+
+  const seen = new Set<string>();
+  const result: any[] = [];
+
+  for (const row of rows) {
+    const chatKey = generateChatKey(TALKUP_USER_ID, row.receiver_id);
+    const decrypted = decryptMessage(row.content, chatKey);
+
+    let content = decrypted;
+    let imageUrl: string | undefined;
+
+    if (decrypted.startsWith("IMAGE::")) {
+      const parts = decrypted.split("::");
+      imageUrl = parts[1];
+      content = parts[2] ?? "";
+    }
+
+    const key = content + (imageUrl ?? "");
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push({
+        id: row.id,
+        created_at: row.created_at,
+        content,
+        imageUrl,
+      });
+    }
+  }
+
+  return result;
 };

@@ -1,4 +1,6 @@
 // ─── HomeScreen.tsx ───────────────────────────────────────────────────────────
+// When the logged-in user IS the TalkUp account, redirect to BroadcastScreen.
+// Everyone else sees the normal home screen.
 
 import { forwardRef, useEffect, useRef, useState } from "react";
 import {
@@ -11,6 +13,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { router } from "expo-router";
 import { useFonts } from "expo-font";
 import {
   Outfit_400Regular,
@@ -19,22 +22,18 @@ import {
 } from "@expo-google-fonts/outfit";
 
 import Colors from "./constants/colors";
-// import { useHomeData } from "./useHomeData";
-// import { getSecretKey, hasSecretKey } from "./hiddenChats";
 import { HomeHeader } from "./components/HomeHeader";
 import { FriendRow } from "./components/FriendRow";
 import { RequestRow } from "./components/RequestRow";
 import { EmptyState } from "./components/EmptyState";
 import { SearchBar } from "./components/SearchBar";
-// import { ActionModal } from "./components/ActionModal";
 import { DeleteModal } from "./components/DeleteModal";
-// import { SetSecretKeyModal } from "./components/SetSecretKeyModal";
 // import type { Friend, Tab } from "./types";
 import { useHomeData } from "./home_compo/useHomeData";
 import { getSecretKey, hasSecretKey } from "./home_compo/Hiddenchats";
+import { Friend, Tab, TALKUP_USER_ID } from "./home_compo/types";
 import { ActionModal } from "./components/Actionmodal";
 import { SetSecretKeyModal } from "./components/Setsecretkeymodal";
-import { Friend, Tab } from "./home_compo/types";
 
 const HomeScreen = forwardRef<View>((props, ref) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -44,13 +43,8 @@ const HomeScreen = forwardRef<View>((props, ref) => {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [secretUnlocked, setSecretUnlocked] = useState(false);
-
-  // Action bottom sheet (long press)
   const [actionTarget, setActionTarget] = useState<Friend | null>(null);
-
-  // Delete confirmation modal
   const [deleteTarget, setDeleteTarget] = useState<Friend | null>(null);
-
   const [showSetKey, setShowSetKey] = useState(false);
   const pendingHideId = useRef<string | null>(null);
 
@@ -58,6 +52,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     friends,
     pendingRequests,
     currentUser,
+    currentUserId,
     loading,
     refreshing,
     loadData,
@@ -89,7 +84,14 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     ]).start();
   }, []);
 
-  // ── Secret key check on every query change ───────────────────────────────────
+  // ── If this IS the TalkUp account, redirect to broadcast screen ──────────────
+  useEffect(() => {
+    if (currentUserId && currentUserId === TALKUP_USER_ID) {
+      router.replace("/broadcast");
+    }
+  }, [currentUserId]);
+
+  // ── Secret key check ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSecretUnlocked(false);
@@ -102,23 +104,32 @@ const HomeScreen = forwardRef<View>((props, ref) => {
 
   // ── Filter logic ──────────────────────────────────────────────────────────────
   const visibleFriends = (() => {
+    const talkUpRow = friends.find((f) => f.isTalkUp);
+    const rest = friends.filter((f) => !f.isTalkUp);
+
+    let filtered: Friend[];
     if (secretUnlocked) {
-      // Show ALL friends (hidden + visible) when key is correct
-      return friends;
-    }
-    if (searchQuery.trim()) {
-      // Normal search — only non-hidden friends, filter by name
-      return friends.filter(
+      filtered = rest;
+    } else if (searchQuery.trim()) {
+      filtered = rest.filter(
         (f) =>
           !f.isHidden &&
           f.username.toLowerCase().includes(searchQuery.toLowerCase()),
       );
+    } else {
+      filtered = rest.filter((f) => !f.isHidden);
     }
-    // Default view — hide hidden friends
-    return friends.filter((f) => !f.isHidden);
+
+    return talkUpRow ? [talkUpRow, ...filtered] : filtered;
   })();
 
-  // ── Hide chat — check if key exists first ─────────────────────────────────────
+  // ── Long press guard for TalkUp ───────────────────────────────────────────────
+  const onFriendLongPress = (item: Friend) => {
+    if (item.isTalkUp) return;
+    setActionTarget(item);
+  };
+
+  // ── Hide chat ─────────────────────────────────────────────────────────────────
   const tryHideChat = async (friendId: string) => {
     const keyExists = await hasSecretKey();
     if (!keyExists) {
@@ -144,7 +155,6 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     setDeleteTarget(null);
   };
 
-  // ── Close search ──────────────────────────────────────────────────────────────
   const closeSearch = () => {
     setSearchVisible(false);
     setSearchQuery("");
@@ -155,24 +165,17 @@ const HomeScreen = forwardRef<View>((props, ref) => {
 
   return (
     <View ref={ref} style={styles.container}>
-      {/* ── Header ── */}
       <HomeHeader
         username={currentUser?.username}
         fadeAnim={fadeAnim}
         slideAnim={slideAnim}
-        onSearchPress={() => {
-          if (searchVisible) {
-            closeSearch();
-          } else {
-            setSearchVisible(true);
-          }
-        }}
+        onSearchPress={() =>
+          searchVisible ? closeSearch() : setSearchVisible(true)
+        }
         searchActive={searchVisible}
       />
 
-      {/* ── Body ── */}
       <View style={styles.body}>
-        {/* Search bar */}
         {searchVisible && (
           <SearchBar
             value={searchQuery}
@@ -182,7 +185,6 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           />
         )}
 
-        {/* Pending friend requests (hidden while searching) */}
         {!searchVisible && pendingRequests.length > 0 && (
           <Animated.View style={{ opacity: fadeAnim }}>
             <Text style={styles.sectionTitle}>
@@ -205,7 +207,6 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           </Animated.View>
         )}
 
-        {/* DM / Group tabs (hidden while searching) */}
         {!searchVisible && (
           <Animated.View
             style={[
@@ -239,14 +240,14 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           </Animated.View>
         )}
 
-        {/* Friends list */}
         {loading ? (
           <ActivityIndicator
             color={Colors.primary}
             size="large"
             style={{ marginTop: 40 }}
           />
-        ) : visibleFriends.length === 0 ? (
+        ) : visibleFriends.length === 0 ||
+          (visibleFriends.length === 1 && visibleFriends[0]?.isTalkUp) ? (
           <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
             <EmptyState
               searching={searchQuery.trim().length > 0 && !secretUnlocked}
@@ -259,7 +260,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
             renderItem={({ item }) => (
               <FriendRow
                 item={item}
-                onLongPress={() => setActionTarget(item)}
+                onLongPress={() => onFriendLongPress(item)}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -276,7 +277,6 @@ const HomeScreen = forwardRef<View>((props, ref) => {
         )}
       </View>
 
-      {/* ── Long press action sheet ── */}
       <ActionModal
         friend={actionTarget}
         visible={!!actionTarget}
@@ -286,7 +286,6 @@ const HomeScreen = forwardRef<View>((props, ref) => {
         onCancel={() => setActionTarget(null)}
       />
 
-      {/* ── Delete confirmation ── */}
       <DeleteModal
         visible={!!deleteTarget}
         username={deleteTarget?.username ?? ""}
@@ -294,7 +293,6 @@ const HomeScreen = forwardRef<View>((props, ref) => {
         onCancel={() => setDeleteTarget(null)}
       />
 
-      {/* ── Set secret key (first time) ── */}
       <SetSecretKeyModal
         visible={showSetKey}
         onSaved={onKeySet}
@@ -311,10 +309,7 @@ HomeScreen.displayName = "HomeScreen";
 export default HomeScreen;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
-  },
+  container: { flex: 1, backgroundColor: Colors.background },
   body: {
     flex: 1,
     backgroundColor: Colors.background,
@@ -335,11 +330,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.neutral200,
     marginHorizontal: 28,
   },
-  divider: {
-    height: 8,
-    backgroundColor: Colors.neutral100,
-    marginVertical: 8,
-  },
+  divider: { height: 8, backgroundColor: Colors.neutral100, marginVertical: 8 },
   tabRow: {
     flexDirection: "row",
     marginHorizontal: 24,
@@ -356,19 +347,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  tabActive: {
-    backgroundColor: Colors.primary,
-  },
+  tabActive: { backgroundColor: Colors.primary },
   tabText: {
     fontFamily: "Outfit_600SemiBold",
     fontSize: 14,
     color: Colors.neutral500,
   },
-  tabTextActive: {
-    color: Colors.black,
-  },
-  listContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
+  tabTextActive: { color: Colors.black },
+  listContent: { paddingHorizontal: 20, paddingBottom: 20 },
 });

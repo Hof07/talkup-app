@@ -8,7 +8,11 @@
     "scheme": "chatapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.hof.talkupapp",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -46,6 +50,12 @@
       "eas": {
         "projectId": "392fb3ab-24c4-49f1-9a95-d5a04c7895b1"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/392fb3ab-24c4-49f1-9a95-d5a04c7895b1"
     }
   }
 }
