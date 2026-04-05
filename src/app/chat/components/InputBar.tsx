@@ -200,7 +200,6 @@ export default function InputBar({
               </TouchableOpacity>
             </Animated.View>
 
-            {/* Sparkles + Send - show when typing */}
             <Animated.View
               style={{
                 flexDirection: "row",
@@ -220,7 +219,6 @@ export default function InputBar({
                 pointerEvents: value.trim() ? "auto" : "none",
               }}
             >
-              {/* Grammar Fix */}
               <TouchableOpacity
                 onPress={handleFix}
                 disabled={fixing}
@@ -293,8 +291,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    // width fixed to fit 3 icons so layout doesn't jump
-    width: 3 * 40 + 2 * 6, // 3 icons + 2 gaps
+    width: 3 * 40 + 2 * 6, 
     marginBottom: 2,
   },
   textInput: {
@@ -303,7 +300,7 @@ const s = StyleSheet.create({
     fontFamily: "Outfit_400Regular",
     minHeight: MIN_INPUT_HEIGHT,
     maxHeight: MAX_INPUT_HEIGHT,
-    fontWeight: "500",
+    fontWeight: "600",
     paddingTop: 10,
     paddingBottom: 10,
     paddingHorizontal: 8,

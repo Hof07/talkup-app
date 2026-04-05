@@ -27,7 +27,6 @@ import {
 } from "@expo-google-fonts/outfit";
 import { Lock, X, ChevronLeft, ChevronRight } from "lucide-react-native";
 
-import ChatHeader from "./components/ChatHeader";
 import { MessageBubble, Message, ReplyTo } from "./components/MessageBubble";
 import InputBar from "./components/InputBar";
 import ContextMenu from "./components/ContextMenu";
@@ -38,6 +37,7 @@ import ReplyPreview from "./components/ReplyPreview";
 
 import { useChat } from "./hooks/useChat";
 import { useTheme } from "./hooks/useTheme";
+import ChatHeader from "./components/ChatHeader";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -193,6 +193,9 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     null,
   );
 
+  // ── Scroll tracking ───────────────────────────────────────────────────────
+  const userScrolledUp = useRef(false);
+
   const [newMessage, setNewMessage] = useState("");
   const [inputHeight, setInputHeight] = useState(45);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -203,6 +206,11 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [galleryVisible, setGalleryVisible] = useState(false);
+
+  // ── DotsMenu state ────────────────────────────────────────────────────────
+  const [isChatLocked, setIsChatLocked] = useState(false);
+  const [disappearAfterHours, setDisappearAfterHours] = useState<number | null>(null);
+  const [muteUntil, setMuteUntil] = useState<Date | null>(null);
 
   // ── Reply state ───────────────────────────────────────────────────────────
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
@@ -241,10 +249,12 @@ const ChatScreen = forwardRef<View>((props, ref) => {
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
-        setTimeout(
-          () => flatListRef.current?.scrollToEnd({ animated: true }),
-          100,
-        );
+        if (!userScrolledUp.current) {
+          setTimeout(
+            () => flatListRef.current?.scrollToEnd({ animated: true }),
+            100,
+          );
+        }
       },
     );
     const hideL = Keyboard.addListener(
@@ -261,20 +271,19 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   }, []);
 
   useEffect(() => {
-    if (friendIsTyping)
+    if (friendIsTyping && !userScrolledUp.current) {
       setTimeout(
         () => flatListRef.current?.scrollToEnd({ animated: true }),
         100,
       );
+    }
   }, [friendIsTyping]);
 
   // ── Swipe to reply ────────────────────────────────────────────────────────
   const handleSwipeReply = (msg: Message) => {
-    const isImage =
-      msg.message_type === "image" || msg.message_type === "image_group";
     setReplyTo({
       id: msg.id,
-      content: isImage ? msg.content : msg.content,
+      content: msg.content,
       sender_id: msg.sender_id,
       message_type: msg.message_type,
     });
@@ -368,6 +377,40 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     }).start(() => setThemeSheetVisible(false));
   };
 
+  // ── DotsMenu handlers ─────────────────────────────────────────────────────
+  const handleLockChat = () => {
+    setIsChatLocked((prev) => !prev);
+    // TODO: wire up biometric / PIN logic here
+  };
+
+  const handleDisappearingMessages = () => {
+    // Cycle: off → 1h → 6h → 24h → off
+    setDisappearAfterHours((prev) => {
+      if (prev === null) return 1;
+      if (prev === 1) return 6;
+      if (prev === 6) return 24;
+      return null;
+    });
+  };
+
+  const handleMuteNotifications = () => {
+    const now = new Date();
+    const isMuted = muteUntil !== null && muteUntil > now;
+    if (isMuted) {
+      setMuteUntil(null);
+    } else {
+      // Mute for 1 hour by default
+      const until = new Date(now.getTime() + 60 * 60 * 1000);
+      setMuteUntil(until);
+    }
+  };
+
+  const handleSearchChat = () => {
+    closeDotsMenu();
+    // TODO: implement in-chat search UI
+    Alert.alert("Search", "Search in chat coming soon!");
+  };
+
   // ── Send ──────────────────────────────────────────────────────────────────
   const handleSend = async () => {
     if (!newMessage.trim() || sending) return;
@@ -375,7 +418,9 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     const currentReply = replyTo;
     setNewMessage("");
     setInputHeight(45);
-    setReplyTo(null); // clear reply after send
+    setReplyTo(null);
+    // User is sending — always scroll to their new message
+    userScrolledUp.current = false;
     await sendMessage(text, currentReply);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
   };
@@ -383,6 +428,8 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const handleImagePick = async () => {
     const currentReply = replyTo;
     setReplyTo(null);
+    // User is sending — always scroll to their new message
+    userScrolledUp.current = false;
     await sendImage(id as string, currentReply);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300);
   };
@@ -393,7 +440,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     await reactToMessage(selectedMsg, emoji);
   };
 
-  // Also allow reply from long-press context menu
   const handleReplyFromMenu = () => {
     if (!selectedMsg) return;
     closeMenu();
@@ -442,6 +488,14 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const headerBgColor = isImageTheme ? `${theme.headerBg}D0` : theme.headerBg;
   const e2eBgColor = isImageTheme ? `${theme.inputBarBg}BB` : theme.inputBarBg;
 
+  // ── Scroll handler ────────────────────────────────────────────────────────
+  const handleScroll = (e: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+    const distanceFromBottom =
+      contentSize.height - contentOffset.y - layoutMeasurement.height;
+    userScrolledUp.current = distanceFromBottom > 80;
+  };
+
   const chatContent = (
     <View style={[s.flex, { marginBottom: keyboardHeight }]}>
       {loading ? (
@@ -471,9 +525,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
           contentContainerStyle={s.listContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          onContentSizeChange={() =>
-            flatListRef.current?.scrollToEnd({ animated: false })
-          }
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+          onContentSizeChange={() => {
+            if (!userScrolledUp.current) {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }
+          }}
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
           ListFooterComponent={() => (
             <TypingIndicator
@@ -504,7 +562,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         />
       )}
 
-      {/* Reply preview bar above input */}
       {replyTo && (
         <ReplyPreview
           replyTo={replyTo}
@@ -527,6 +584,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         }
         theme={theme}
         isImageTheme={isImageTheme}
+        userId={currentUserId}
       />
     </View>
   );
@@ -599,6 +657,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         onClose={closeDotsMenu}
         onThemePress={openThemeSheet}
         onClearChat={handleClearChat}
+        onLockChat={handleLockChat}
+        isChatLocked={isChatLocked}
+        onDisappearingMessages={handleDisappearingMessages}
+        disappearAfterHours={disappearAfterHours}
+        onMuteNotifications={handleMuteNotifications}
+        muteUntil={muteUntil}
+        onSearchChat={handleSearchChat}
       />
       <ThemeSheet
         visible={themeSheetVisible}
