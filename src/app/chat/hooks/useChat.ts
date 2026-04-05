@@ -551,7 +551,7 @@ export const useChat = (friendId: string) => {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msg.id
-            ? { ...m, deleted_for_everyone: true, content: "__deleted__" }
+            ? { ...m, deleted_for_everyone: true, content: "🚫 This message was deleted" }
             : m
         )
       );
