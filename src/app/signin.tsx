@@ -44,31 +44,37 @@ const SignIn = forwardRef<View>((props, ref) => {
   });
 
   useEffect(() => {
-    // Infinite loop animation
-    const loopAnimation = () => {
-      fadeAnim.setValue(0);
-      slideAnim.setValue(50);
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 900,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 900,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.delay(1500),
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 900,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 50,
+            duration: 900,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    ).start();
 
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 900,
-          useNativeDriver: true,
-        }),
-      ]).start(({ finished }) => {
-        if (finished) {
-          setTimeout(() => loopAnimation(), 1500);
-        }
-      });
-    };
-
-    loopAnimation();
-
+    // keyboard listeners stay same
     const showListener = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
       () => {

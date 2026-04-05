@@ -13,11 +13,27 @@ import { Message, Reaction, ReplyTo } from "../utils/types";
 
 export type { Message, Reaction, ReplyTo };
 
+const PAGE_SIZE = 20;
+
+// ── In-memory cache per chat room ─────────────────────────────────────────────
+const messageCache = new Map<string, Message[]>();
+
+const dedupe = (msgs: Message[]) => {
+  const seen = new Set<string>();
+  return msgs.filter((m) => {
+    if (seen.has(m.id)) return false;
+    seen.add(m.id);
+    return true;
+  });
+};
+
 export const useChat = (friendId: string) => {
   const currentUserIdRef = useRef("");
   const channelRef = useRef<any>(null);
   const chatKeyRef = useRef("");
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const oldestCreatedAt = useRef<string | null>(null);
+  const isFetchingMore = useRef(false);
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
@@ -25,10 +41,12 @@ export const useChat = (friendId: string) => {
   const [sending, setSending] = useState(false);
   const [friendLastSeen, setFriendLastSeen] = useState<string | null>(null);
   const [friendIsTyping, setFriendIsTyping] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const decryptMsg = (msg: Message): Message => {
     if (msg.deleted_for_everyone)
-      return { ...msg, content: "🚫 This message was deleted" };
+      return { ...msg, content: "__deleted__" };
     if (msg.message_type === "image" || msg.message_type === "image_group")
       return msg;
     try {
@@ -53,22 +71,41 @@ export const useChat = (friendId: string) => {
       currentUserIdRef.current = uid;
       setCurrentUserId(uid);
       chatKeyRef.current = generateChatKey(uid, friendId);
+
       const { error } = await supabase.auth.setSession({
         access_token: session.access_token,
         refresh_token: session.refresh_token,
       });
       if (error) throw error;
-      await supabase
-        .from("users")
-        .update({ last_seen: new Date().toISOString() })
-        .eq("id", uid);
-      const { data: fd } = await supabase
-        .from("users")
-        .select("last_seen")
-        .eq("id", friendId)
-        .single();
-      setFriendLastSeen(fd?.last_seen || null);
-      await loadMessages(uid);
+
+      // ── Load from cache instantly while fetching fresh data ──────────────
+      const cacheKey = `${uid}_${friendId}`;
+      const cached = messageCache.get(cacheKey);
+      if (cached && cached.length > 0) {
+        setMessages(cached);
+        setLoading(false);
+      }
+
+      // ── All fetches in parallel ───────────────────────────────────────────
+      const [, , messagesResult] = await Promise.all([
+        // update own last_seen
+        supabase
+          .from("users")
+          .update({ last_seen: new Date().toISOString() })
+          .eq("id", uid),
+
+        // fetch friend last_seen
+        supabase
+          .from("users")
+          .select("last_seen")
+          .eq("id", friendId)
+          .single()
+          .then(({ data }) => setFriendLastSeen(data?.last_seen || null)),
+
+        // fetch messages
+        loadMessages(uid, true),
+      ]);
+
       setupRealtime(uid);
       setLoading(false);
       return uid;
@@ -78,25 +115,86 @@ export const useChat = (friendId: string) => {
     }
   };
 
-  const loadMessages = async (uid: string) => {
+  const loadMessages = async (uid: string, isInit = false) => {
     const { data, error } = await supabase
       .from("messages")
       .select("*")
       .or(
-        `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`,
+        `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`
       )
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE);
+
     if (error) return;
+
     const filtered = (data || []).filter(
-      (m) => !(m.deleted_for || []).includes(uid),
+      (m) => !(m.deleted_for || []).includes(uid)
     );
-    setMessages(filtered.map(decryptMsg));
-    await supabase
+    const decrypted = filtered.map(decryptMsg).reverse();
+
+    if (decrypted.length > 0) {
+      oldestCreatedAt.current = decrypted[0].created_at;
+    }
+
+    setHasMore(filtered.length === PAGE_SIZE);
+
+    const deduped = dedupe(decrypted);
+
+    // ── Save to cache ─────────────────────────────────────────────────────
+    const cacheKey = `${uid}_${friendId}`;
+    messageCache.set(cacheKey, deduped);
+
+    setMessages(deduped);
+
+    // ── Mark as read in background (don't await) ──────────────────────────
+    supabase
       .from("messages")
       .update({ is_read: true })
       .eq("sender_id", friendId)
       .eq("receiver_id", uid)
-      .eq("is_read", false);
+      .eq("is_read", false)
+      .then(() => {});
+  };
+
+  const loadMoreMessages = async () => {
+    const uid = currentUserIdRef.current;
+    if (!hasMore || isFetchingMore.current || !oldestCreatedAt.current) return;
+
+    isFetchingMore.current = true;
+    setLoadingMore(true);
+
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .or(
+        `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`
+      )
+      .lt("created_at", oldestCreatedAt.current)
+      .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE);
+
+    isFetchingMore.current = false;
+    setLoadingMore(false);
+
+    if (error) return;
+
+    const filtered = (data || []).filter(
+      (m) => !(m.deleted_for || []).includes(uid)
+    );
+    const decrypted = filtered.map(decryptMsg).reverse();
+
+    if (decrypted.length > 0) {
+      oldestCreatedAt.current = decrypted[0].created_at;
+    }
+
+    setHasMore(filtered.length === PAGE_SIZE);
+    setMessages((prev) => {
+      const merged = dedupe([...decrypted, ...prev]);
+      // update cache
+      const cacheKey = `${uid}_${friendId}`;
+      messageCache.set(cacheKey, merged);
+      return merged;
+    });
   };
 
   const setupRealtime = (uid: string) => {
@@ -109,7 +207,7 @@ export const useChat = (friendId: string) => {
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
           typingTimeoutRef.current = setTimeout(
             () => setFriendIsTyping(false),
-            3000,
+            3000
           );
         }
       })
@@ -131,18 +229,28 @@ export const useChat = (friendId: string) => {
           if ((msg.deleted_for || []).includes(uid)) return;
           const dec = decryptMsg(msg);
           setMessages((prev) => {
-            const filtered = prev.filter(
-              (m) => !m.is_temp || m.content !== dec.content,
+            const withoutTemp = prev.filter(
+              (m) =>
+                !(
+                  m.is_temp &&
+                  m.content === dec.content &&
+                  m.sender_id === dec.sender_id
+                )
             );
-            if (filtered.find((m) => m.id === dec.id)) return filtered;
-            return [...filtered, dec];
+            if (withoutTemp.find((m) => m.id === dec.id)) return withoutTemp;
+            const updated = dedupe([...withoutTemp, dec]);
+            // update cache
+            const cacheKey = `${uid}_${friendId}`;
+            messageCache.set(cacheKey, updated);
+            return updated;
           });
           if (msg.receiver_id === uid)
-            await supabase
+            supabase
               .from("messages")
               .update({ is_read: true })
-              .eq("id", msg.id);
-        },
+              .eq("id", msg.id)
+              .then(() => {});
+        }
       )
       .on(
         "postgres_changes",
@@ -166,20 +274,20 @@ export const useChat = (friendId: string) => {
                     reactions: updated.reactions,
                     deleted_for_everyone: updated.deleted_for_everyone,
                     content: updated.deleted_for_everyone
-                      ? "🚫 This message was deleted"
+                      ? "__deleted__"
                       : m.content,
                   }
-                : m,
-            ),
+                : m
+            )
           );
-        },
+        }
       )
       .on(
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "messages" },
         (payload) => {
           setMessages((prev) => prev.filter((m) => m.id !== payload.old.id));
-        },
+        }
       )
       .subscribe();
   };
@@ -202,26 +310,30 @@ export const useChat = (friendId: string) => {
     });
   };
 
-  // ── Send message with optional reply ──────────────────────────────────────
   const sendMessage = async (plainText: string, replyTo?: ReplyTo | null) => {
     const uid = currentUserIdRef.current;
     broadcastStopTyping();
     setSending(true);
     const tempId = `temp_${Date.now()}`;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        sender_id: uid,
-        receiver_id: friendId,
-        content: plainText,
-        created_at: new Date().toISOString(),
-        is_read: false,
-        is_temp: true,
-        message_type: "text" as const,
-        reply_to: replyTo || null,
-      },
-    ]);
+
+    // ── Show message instantly ────────────────────────────────────────────
+    setMessages((prev) =>
+      dedupe([
+        ...prev,
+        {
+          id: tempId,
+          sender_id: uid,
+          receiver_id: friendId,
+          content: plainText,
+          created_at: new Date().toISOString(),
+          is_read: false,
+          is_temp: true,
+          message_type: "text" as const,
+          reply_to: replyTo || null,
+        },
+      ])
+    );
+
     const { data, error } = await supabase
       .from("messages")
       .insert([
@@ -236,21 +348,24 @@ export const useChat = (friendId: string) => {
       ])
       .select()
       .single();
+
     if (error) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
       Alert.alert("Failed to send", error.message);
     } else if (data) {
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId
-            ? {
-                ...data,
-                content: plainText,
-                is_temp: false,
-                reply_to: replyTo || null,
-              }
-            : m,
-        ),
+        dedupe(
+          prev.map((m) =>
+            m.id === tempId
+              ? {
+                  ...data,
+                  content: plainText,
+                  is_temp: false,
+                  reply_to: replyTo || null,
+                }
+              : m
+          )
+        )
       );
     }
     setSending(false);
@@ -260,11 +375,17 @@ export const useChat = (friendId: string) => {
   const uploadImageFile = async (
     uri: string,
     uid: string,
-    token: string,
+    token: string
   ): Promise<string> => {
-    const fileName = `${uid}/${Date.now()}_${Math.random().toString(36).slice(2)}.jpg`;
+    const fileName = `${uid}/${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2)}.jpg`;
     const formData = new FormData();
-    formData.append("file", { uri, name: fileName, type: "image/jpeg" } as any);
+    formData.append("file", {
+      uri,
+      name: fileName,
+      type: "image/jpeg",
+    } as any);
     const headers = {
       apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
       Authorization: `Bearer ${token}`,
@@ -296,29 +417,31 @@ export const useChat = (friendId: string) => {
     const tempId = `temp_${Date.now()}`;
     const isMultiple = uris.length > 1;
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        sender_id: uid,
-        receiver_id: receiverId,
-        content: uris[0],
-        images: isMultiple ? uris : undefined,
-        created_at: new Date().toISOString(),
-        is_read: false,
-        is_temp: true,
-        message_type: (isMultiple ? "image_group" : "image") as
-          | "image"
-          | "image_group",
-        reply_to: replyTo || null,
-      },
-    ]);
+    setMessages((prev) =>
+      dedupe([
+        ...prev,
+        {
+          id: tempId,
+          sender_id: uid,
+          receiver_id: receiverId,
+          content: uris[0],
+          images: isMultiple ? uris : undefined,
+          created_at: new Date().toISOString(),
+          is_read: false,
+          is_temp: true,
+          message_type: (isMultiple ? "image_group" : "image") as
+            | "image"
+            | "image_group",
+          reply_to: replyTo || null,
+        },
+      ])
+    );
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const token = sessionData.session?.access_token || "";
       const uploadedUrls = await Promise.all(
-        uris.map((uri) => uploadImageFile(uri, uid, token)),
+        uris.map((uri) => uploadImageFile(uri, uid, token))
       );
 
       const messagePayload = isMultiple
@@ -351,20 +474,22 @@ export const useChat = (friendId: string) => {
         Alert.alert("Failed to send image", error.message);
       } else if (data) {
         setMessages((prev) =>
-          prev.map((m) =>
-            m.id === tempId
-              ? {
-                  ...data,
-                  content: uploadedUrls[0],
-                  images: isMultiple ? uploadedUrls : undefined,
-                  is_temp: false,
-                  message_type: (isMultiple ? "image_group" : "image") as
-                    | "image"
-                    | "image_group",
-                  reply_to: replyTo || null,
-                }
-              : m,
-          ),
+          dedupe(
+            prev.map((m) =>
+              m.id === tempId
+                ? {
+                    ...data,
+                    content: uploadedUrls[0],
+                    images: isMultiple ? uploadedUrls : undefined,
+                    is_temp: false,
+                    message_type: (isMultiple
+                      ? "image_group"
+                      : "image") as "image" | "image_group",
+                    reply_to: replyTo || null,
+                  }
+                : m
+            )
+          )
         );
       }
     } catch (e: any) {
@@ -377,20 +502,23 @@ export const useChat = (friendId: string) => {
     const uid = currentUserIdRef.current;
     const current: Reaction[] = msg.reactions || [];
     const existing = current.find(
-      (r) => r.user_id === uid && r.emoji === emoji,
+      (r) => r.user_id === uid && r.emoji === emoji
     );
     const newReactions = existing
       ? current.filter((r) => !(r.user_id === uid && r.emoji === emoji))
       : [...current.filter((r) => r.user_id !== uid), { emoji, user_id: uid }];
+
+    // ── Optimistic update ─────────────────────────────────────────────────
     setMessages((prev) =>
       prev.map((m) =>
-        m.id === msg.id ? { ...m, reactions: newReactions } : m,
-      ),
+        m.id === msg.id ? { ...m, reactions: newReactions } : m
+      )
     );
-    await supabase
+    supabase
       .from("messages")
       .update({ reactions: newReactions })
-      .eq("id", msg.id);
+      .eq("id", msg.id)
+      .then(() => {});
   };
 
   const deleteMessage = async (msg: Message, forEveryone: boolean) => {
@@ -399,37 +527,40 @@ export const useChat = (friendId: string) => {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msg.id
-            ? {
-                ...m,
-                deleted_for_everyone: true,
-                content: "🚫 This message was deleted",
-              }
-            : m,
-        ),
+            ? { ...m, deleted_for_everyone: true, content: "__deleted__" }
+            : m
+        )
       );
-      await supabase
+      supabase
         .from("messages")
         .update({ deleted_for_everyone: true })
-        .eq("id", msg.id);
+        .eq("id", msg.id)
+        .then(() => {});
     } else {
       const deletedFor = [...(msg.deleted_for || []), uid];
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-      await supabase
+      supabase
         .from("messages")
         .update({ deleted_for: deletedFor })
-        .eq("id", msg.id);
+        .eq("id", msg.id)
+        .then(() => {});
     }
   };
 
   const clearChat = async () => {
     const uid = currentUserIdRef.current;
     setMessages([]);
-    await supabase
+    oldestCreatedAt.current = null;
+    setHasMore(true);
+    const cacheKey = `${uid}_${friendId}`;
+    messageCache.delete(cacheKey);
+    supabase
       .from("messages")
       .delete()
       .or(
-        `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`,
-      );
+        `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`
+      )
+      .then(() => {});
   };
 
   const cleanup = () => {
@@ -446,6 +577,8 @@ export const useChat = (friendId: string) => {
     friendIsTyping,
     currentUserId,
     currentUserIdRef,
+    hasMore,
+    loadingMore,
     init,
     sendMessage,
     sendImage,
@@ -453,6 +586,7 @@ export const useChat = (friendId: string) => {
     broadcastStopTyping,
     reactToMessage,
     deleteMessage,
+    loadMoreMessages,
     clearChat,
     cleanup,
   };

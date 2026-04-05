@@ -1,17 +1,17 @@
+import { Check, X } from "lucide-react-native";
 import {
-  View,
+  Animated,
+  Dimensions,
+  ImageBackground,
+  Modal,
+  ScrollView,
+  StyleSheet,
   Text,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  Modal,
-  Animated,
-  StyleSheet,
-  Dimensions,
-  ScrollView,
-  ImageBackground,
+  View,
 } from "react-native";
-import { X, Check } from "lucide-react-native";
-import { THEMES, ChatTheme } from "../../../lib/themes";
+import { ChatTheme, THEMES } from "../../../lib/themes";
 
 const { width } = Dimensions.get("window");
 const THEME_CARD_W = (width - 48 - 12) / 2;
@@ -96,7 +96,10 @@ export default function ThemeSheet({
                         ]}
                       />
                       <Text
-                        style={[s.previewHeaderText, { color: theme.headerText }]}
+                        style={[
+                          s.previewHeaderText,
+                          { color: theme.headerText },
+                        ]}
                         numberOfLines={1}
                       >
                         {username}
@@ -121,7 +124,9 @@ export default function ThemeSheet({
                           </Text>
                         </View>
                       </View>
-                      <View style={[s.previewRow, { justifyContent: "flex-end" }]}>
+                      <View
+                        style={[s.previewRow, { justifyContent: "flex-end" }]}
+                      >
                         <View
                           style={[
                             s.previewBubble,
@@ -141,7 +146,9 @@ export default function ThemeSheet({
                     </View>
                   </ImageBackground>
                 ) : (
-                  <View style={[s.previewBg, { backgroundColor: theme.chatBg }]}>
+                  <View
+                    style={[s.previewBg, { backgroundColor: theme.chatBg }]}
+                  >
                     {/* Header strip */}
                     <View
                       style={[
@@ -161,7 +168,10 @@ export default function ThemeSheet({
                         ]}
                       />
                       <Text
-                        style={[s.previewHeaderText, { color: theme.headerText }]}
+                        style={[
+                          s.previewHeaderText,
+                          { color: theme.headerText },
+                        ]}
                         numberOfLines={1}
                       >
                         {username}
@@ -186,7 +196,9 @@ export default function ThemeSheet({
                           </Text>
                         </View>
                       </View>
-                      <View style={[s.previewRow, { justifyContent: "flex-end" }]}>
+                      <View
+                        style={[s.previewRow, { justifyContent: "flex-end" }]}
+                      >
                         <View
                           style={[
                             s.previewBubble,

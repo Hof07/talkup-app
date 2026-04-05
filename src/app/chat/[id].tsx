@@ -209,7 +209,9 @@ const ChatScreen = forwardRef<View>((props, ref) => {
 
   // ── DotsMenu state ────────────────────────────────────────────────────────
   const [isChatLocked, setIsChatLocked] = useState(false);
-  const [disappearAfterHours, setDisappearAfterHours] = useState<number | null>(null);
+  const [disappearAfterHours, setDisappearAfterHours] = useState<number | null>(
+    null,
+  );
   const [muteUntil, setMuteUntil] = useState<Date | null>(null);
 
   // ── Reply state ───────────────────────────────────────────────────────────
@@ -224,11 +226,14 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     friendIsTyping,
     currentUserId,
     currentUserIdRef,
+    hasMore,
+    loadingMore,
     init,
     sendMessage,
     sendImage,
     broadcastTyping,
     broadcastStopTyping,
+    loadMoreMessages,
     reactToMessage,
     deleteMessage,
     clearChat,
@@ -488,9 +493,14 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const headerBgColor = isImageTheme ? `${theme.headerBg}D0` : theme.headerBg;
   const e2eBgColor = isImageTheme ? `${theme.inputBarBg}BB` : theme.inputBarBg;
 
-  // ── Scroll handler ────────────────────────────────────────────────────────
   const handleScroll = (e: any) => {
     const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
+
+    // load older messages when near top
+    if (contentOffset.y < 80) {
+      loadMoreMessages();
+    }
+
     const distanceFromBottom =
       contentSize.height - contentOffset.y - layoutMeasurement.height;
     userScrolledUp.current = distanceFromBottom > 80;
@@ -559,6 +569,16 @@ const ChatScreen = forwardRef<View>((props, ref) => {
               </Text>
             </View>
           )}
+
+          ListHeaderComponent={() =>
+            loadingMore ? (
+              <ActivityIndicator
+                color={theme.sendBtnBg}
+                size="small"
+                style={{ marginVertical: 12 }}
+              />
+            ) : null
+          }
         />
       )}
 
