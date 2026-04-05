@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { router } from "expo-router";
-import { EyeOff } from "lucide-react-native";
+import { EyeOff, Pin } from "lucide-react-native";
 import Colors from "../constants/colors";
 // import { isOnline, formatLastSeen } from "../utils";
 // import { Friend } from "../types";
@@ -21,16 +21,17 @@ import { formatLastSeen, isOnline } from "../home_compo/utils";
 interface Props {
   item:        Friend;
   onLongPress: () => void;
+  isPinned?:   boolean;
 }
 
-export const FriendRow = ({ item, onLongPress }: Props) => {
+export const FriendRow = ({ item, onLongPress, isPinned }: Props) => {
   if (item.isTalkUp) return <TalkUpRow item={item} />;
-  return <RegularFriendRow item={item} onLongPress={onLongPress} />;
+  return <RegularFriendRow item={item} onLongPress={onLongPress} isPinned={isPinned} />;
 };
 
 // ── Regular friend row ────────────────────────────────────────────────────────
 
-const RegularFriendRow = ({ item, onLongPress }: Props) => {
+const RegularFriendRow = ({ item, onLongPress, isPinned }: Props) => {
   const online    = isOnline(item.last_seen);
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const [pressed, setPressed] = useState(false);   // bg color via state, not native driver
@@ -110,6 +111,9 @@ const RegularFriendRow = ({ item, onLongPress }: Props) => {
                   <EyeOff size={10} color={Colors.neutral500} />
                   <Text style={styles.hiddenBadgeText}>hidden</Text>
                 </View>
+              )}
+              {isPinned && (
+                <Pin size={12} color={Colors.primary} style={{ marginLeft: 2 }} />
               )}
             </View>
             <Text style={styles.time}>{item.last_message_time}</Text>

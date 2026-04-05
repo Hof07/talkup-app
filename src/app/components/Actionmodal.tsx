@@ -4,7 +4,7 @@
 // Options: Hide chat / Unhide chat / Delete / Cancel
 // Styled like WhatsApp/Instagram bottom action sheets.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Animated,
   Modal,
@@ -14,10 +14,10 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import { EyeOff, Eye, Trash2 } from "lucide-react-native";
+import { EyeOff, Eye, Trash2, Pin, PinOff, Ban } from "lucide-react-native";
 import Colors from "../constants/colors";
 import { Friend } from "../home_compo/types";
-// import { Friend } from "../types";
+import { isPinnedChat, togglePinChat } from "../home_compo/pinnedChats";
 
 interface Props {
   friend:     Friend | null;
@@ -26,6 +26,7 @@ interface Props {
   onUnhide:   (id: string) => void;
   onDelete:   (friend: Friend) => void;
   onCancel:   () => void;
+  onPinToggle?: () => void | Promise<void>;
 }
 
 export const ActionModal = ({
@@ -35,9 +36,12 @@ export const ActionModal = ({
   onUnhide,
   onDelete,
   onCancel,
+  onPinToggle,
 }: Props) => {
   const slideAnim   = useRef(new Animated.Value(300)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
+  const [pinned, setPinned] = useState(false);
+  const [blocked, setBlocked] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -45,6 +49,10 @@ export const ActionModal = ({
         Animated.spring(slideAnim,   { toValue: 0,   useNativeDriver: true, tension: 100, friction: 12 }),
         Animated.timing(opacityAnim, { toValue: 1,   duration: 200,         useNativeDriver: true }),
       ]).start();
+      if (friend) {
+        isPinnedChat(friend.id).then(setPinned);
+        import("../home_compo/blockedUsers").then((m) => m.isUserBlocked(friend.id).then(setBlocked));
+      }
     } else {
       Animated.parallel([
         Animated.timing(slideAnim,   { toValue: 300, duration: 220, useNativeDriver: true }),
@@ -54,6 +62,21 @@ export const ActionModal = ({
   }, [visible]);
 
   if (!friend) return null;
+
+  const handlePin = async () => {
+    const newPinned = await togglePinChat(friend.id);
+    setPinned(newPinned);
+    onPinToggle?.();
+    onCancel();
+  };
+
+  const handleBlock = async () => {
+    const m = await import("../home_compo/blockedUsers");
+    const newBlocked = await m.toggleBlockUser(friend.id);
+    setBlocked(newBlocked);
+    // User needs to be alerted or UI updated, but simple toggle for now
+    onCancel();
+  };
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onCancel}>
@@ -71,6 +94,23 @@ export const ActionModal = ({
 
         {/* Friend name label */}
         <Text style={styles.sheetTitle}>{friend.username}</Text>
+
+        {/* Pin / Unpin */}
+        <TouchableOpacity
+          style={styles.option}
+          activeOpacity={0.7}
+          onPress={handlePin}
+        >
+          <View style={[styles.optionIcon, { backgroundColor: "#FFF8E1" }]}>
+            {pinned ? <PinOff size={20} color="#F57F17" /> : <Pin size={20} color="#F57F17" />}
+          </View>
+          <View>
+            <Text style={styles.optionLabel}>{pinned ? "Unpin chat" : "Pin chat"}</Text>
+            <Text style={styles.optionSub}>{pinned ? "Remove from top" : "Keep at the top of your chats"}</Text>
+          </View>
+        </TouchableOpacity>
+
+        <View style={styles.divider} />
 
         {/* Hide / Unhide */}
         {friend.isHidden ? (
@@ -104,6 +144,21 @@ export const ActionModal = ({
         )}
 
         <View style={styles.divider} />
+
+        {/* Block / Unblock */}
+        <TouchableOpacity
+          style={styles.option}
+          activeOpacity={0.7}
+          onPress={handleBlock}
+        >
+          <View style={[styles.optionIcon, { backgroundColor: "#FFEBEE" }]}>
+            <Ban size={20} color="#D32F2F" />
+          </View>
+          <View>
+            <Text style={[styles.optionLabel, { color: "#D32F2F" }]}>{blocked ? "Unblock" : "Block"} user</Text>
+            <Text style={styles.optionSub}>{blocked ? "Allow messages again" : "Stop receiving messages"}</Text>
+          </View>
+        </TouchableOpacity>
 
         {/* Delete */}
         <TouchableOpacity

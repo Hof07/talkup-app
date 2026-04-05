@@ -18,6 +18,7 @@ export interface Friend {
   avatar_url: string | null;
   last_message?: string;
   last_message_time?: string;
+  last_message_timestamp?: string;
   unread_count?: number;
   last_seen?: string | null;
   isHidden?: boolean; 

@@ -36,11 +36,13 @@ import {
   Fingerprint,
   ChevronRight,
   LockIcon,
+  Palette,
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as LocalAuthentication from "expo-local-authentication";
 import { supabase } from "../lib/supabase";
 import Colors from "./constants/colors";
+import { useAppTheme, ThemeMode } from "./constants/ThemeContext";
 import AppLockModal from "./AppLockModal";
 
 const { width } = Dimensions.get("window");
@@ -49,6 +51,7 @@ const PIN_KEY = "app_lock_pin";
 const BIOMETRIC_KEY = "app_lock_biometric";
 
 const SettingsScreen = forwardRef<View>((props, ref) => {
+  const { colors, isDark, mode, setMode } = useAppTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
@@ -470,10 +473,49 @@ const SettingsScreen = forwardRef<View>((props, ref) => {
               <Text style={s.hint}>{status.length}/100</Text>
             </View>
 
+            {/* ── Appearance ── */}
+            <View style={s.sectionLabel}>
+              <Palette size={13} color={colors.neutral500} />
+              <Text style={[s.sectionLabelText, { color: colors.neutral500 }]}>APPEARANCE</Text>
+            </View>
+
+            <View style={[s.card, { backgroundColor: colors.cardBg }]}>
+              <Text style={[s.lockTitle, { color: colors.text, marginBottom: 12 }]}>Theme</Text>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                {(["light", "dark", "system"] as ThemeMode[]).map((m) => (
+                  <TouchableOpacity
+                    key={m}
+                    style={[
+                      {
+                        flex: 1,
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        alignItems: "center",
+                        backgroundColor: mode === m ? Colors.primary : colors.neutral200,
+                      },
+                    ]}
+                    onPress={() => setMode(m)}
+                    activeOpacity={0.8}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Outfit_600SemiBold",
+                        fontSize: 13,
+                        color: mode === m ? Colors.black : colors.neutral500,
+                        textTransform: "capitalize",
+                      }}
+                    >
+                      {m === "system" ? "Auto" : m.charAt(0).toUpperCase() + m.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
             {/* ── App Lock ── */}
             <View style={s.sectionLabel}>
-              <ShieldCheck size={13} color={Colors.neutral500} />
-              <Text style={s.sectionLabelText}>APP LOCK</Text>
+              <ShieldCheck size={13} color={colors.neutral500} />
+              <Text style={[s.sectionLabelText, { color: colors.neutral500 }]}>APP LOCK</Text>
             </View>
 
             <TouchableOpacity

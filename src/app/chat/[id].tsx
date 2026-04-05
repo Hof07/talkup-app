@@ -34,6 +34,9 @@ import DotsMenu from "./components/DotsMenu";
 import ThemeSheet from "./components/ThemeSheet";
 import TypingIndicator from "./components/TypingIndicator";
 import ReplyPreview from "./components/ReplyPreview";
+import SearchInChat from "./components/SearchInChat";
+import ForwardModal from "./components/ForwardModal";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { useChat } from "./hooks/useChat";
 import { useTheme } from "./hooks/useTheme";
@@ -206,6 +209,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const [galleryImages, setGalleryImages] = useState<string[]>([]);
   const [galleryIndex, setGalleryIndex] = useState(0);
   const [galleryVisible, setGalleryVisible] = useState(false);
+  const [searchVisible, setSearchVisible] = useState(false);
 
   // ── DotsMenu state ────────────────────────────────────────────────────────
   const [isChatLocked, setIsChatLocked] = useState(false);
@@ -216,6 +220,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
 
   // ── Reply state ───────────────────────────────────────────────────────────
   const [replyTo, setReplyTo] = useState<ReplyTo | null>(null);
+
+  // ── Forward state ─────────────────────────────────────────────────────────
+  const [forwardVisible, setForwardVisible] = useState(false);
+  const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
+
+  // ── Starred messages ──────────────────────────────────────────────────────
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
 
   const {
     messages,
@@ -273,6 +284,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
       if (typingBroadcastTimeout.current)
         clearTimeout(typingBroadcastTimeout.current);
     };
+  }, []);
+
+  // Load starred messages
+  useEffect(() => {
+    AsyncStorage.getItem(`starred_${id}`).then((raw) => {
+      if (raw) setStarredIds(new Set(JSON.parse(raw)));
+    });
   }, []);
 
   useEffect(() => {
@@ -412,8 +430,14 @@ const ChatScreen = forwardRef<View>((props, ref) => {
 
   const handleSearchChat = () => {
     closeDotsMenu();
-    // TODO: implement in-chat search UI
-    Alert.alert("Search", "Search in chat coming soon!");
+    setTimeout(() => setSearchVisible(true), 200);
+  };
+
+  const handleJumpToMessage = (messageId: string) => {
+    const index = messages.findIndex((m) => m.id === messageId);
+    if (index >= 0 && flatListRef.current) {
+      flatListRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    }
   };
 
   // ── Send ──────────────────────────────────────────────────────────────────
@@ -449,6 +473,26 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     if (!selectedMsg) return;
     closeMenu();
     handleSwipeReply(selectedMsg);
+  };
+
+  const handleForward = () => {
+    if (!selectedMsg) return;
+    closeMenu();
+    setForwardMsg(selectedMsg);
+    setTimeout(() => setForwardVisible(true), 200);
+  };
+
+  const handleStar = async () => {
+    if (!selectedMsg) return;
+    const msgId = selectedMsg.id;
+    closeMenu();
+    setStarredIds((prev) => {
+      const updated = new Set(prev);
+      if (updated.has(msgId)) updated.delete(msgId);
+      else updated.add(msgId);
+      AsyncStorage.setItem(`starred_${id}`, JSON.stringify([...updated]));
+      return updated;
+    });
   };
 
   const handleDelete = () => {
@@ -634,7 +678,16 @@ const ChatScreen = forwardRef<View>((props, ref) => {
               { backgroundColor: theme.chatBg, opacity: 0.12 },
             ]}
           />
-          <ChatHeader
+          {searchVisible ? (
+            <SearchInChat
+              visible={searchVisible}
+              messages={messages}
+              theme={theme}
+              onClose={() => setSearchVisible(false)}
+              onJumpToMessage={handleJumpToMessage}
+            />
+          ) : (
+            <ChatHeader
             username={username as string}
             avatar_url={avatar_url as string}
             friendLastSeen={friendLastSeen}
@@ -642,6 +695,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
             headerBgColor={headerBgColor}
             onDotsPress={openDotsMenu}
           />
+          )}
           <View style={[s.e2eBanner, { backgroundColor: e2eBgColor }]}>
             <Lock size={11} color={theme.dateLabelText} />
             <Text style={[s.e2eBannerText, { color: theme.theirMetaColor }]}>
@@ -652,7 +706,16 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         </ImageBackground>
       ) : (
         <View style={[s.fullScreen, { backgroundColor: theme.chatBg }]}>
-          <ChatHeader
+          {searchVisible ? (
+            <SearchInChat
+              visible={searchVisible}
+              messages={messages}
+              theme={theme}
+              onClose={() => setSearchVisible(false)}
+              onJumpToMessage={handleJumpToMessage}
+            />
+          ) : (
+            <ChatHeader
             username={username as string}
             avatar_url={avatar_url as string}
             friendLastSeen={friendLastSeen}
@@ -660,6 +723,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
             headerBgColor={theme.headerBg}
             onDotsPress={openDotsMenu}
           />
+          )}
           <View style={[s.e2eBanner, { backgroundColor: theme.inputBarBg }]}>
             <Lock size={11} color={theme.dateLabelText} />
             <Text style={[s.e2eBannerText, { color: theme.theirMetaColor }]}>
@@ -703,6 +767,23 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         onDelete={handleDelete}
         onCopy={handleCopy}
         onReply={handleReplyFromMenu}
+        onForward={handleForward}
+        onStar={handleStar}
+        isStarred={selectedMsg ? starredIds.has(selectedMsg.id) : false}
+      />
+      <ForwardModal
+        visible={forwardVisible}
+        messageContent={forwardMsg?.content || ""}
+        messageType={forwardMsg?.message_type || "text"}
+        onClose={() => {
+          setForwardVisible(false);
+          setForwardMsg(null);
+        }}
+        onForwarded={() => {
+          setForwardVisible(false);
+          setForwardMsg(null);
+          Alert.alert("Forwarded", "Message sent!");
+        }}
       />
       <GalleryViewer
         visible={galleryVisible}

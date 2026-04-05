@@ -274,7 +274,7 @@ export const useChat = (friendId: string) => {
                     reactions: updated.reactions,
                     deleted_for_everyone: updated.deleted_for_everyone,
                     content: updated.deleted_for_everyone
-                      ? "__deleted__"
+                      ? "🚫 This message was deleted"
                       : m.content,
                   }
                 : m

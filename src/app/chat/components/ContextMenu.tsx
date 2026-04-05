@@ -9,7 +9,7 @@ import {
   Modal,
   Animated,
 } from "react-native";
-import { Copy, Trash2, Reply } from "lucide-react-native";
+import { Copy, Trash2, Reply, Forward, Star } from "lucide-react-native";
 import { Message } from "../utils/types";
 
 const { width } = Dimensions.get("window");
@@ -26,6 +26,9 @@ interface Props {
   onDelete: () => void;
   onCopy: () => void;
   onReply: () => void;
+  onForward?: () => void;
+  onStar?: () => void;
+  isStarred?: boolean;
 }
 
 export default function ContextMenu({
@@ -38,6 +41,9 @@ export default function ContextMenu({
   onDelete,
   onCopy,
   onReply,
+  onForward,
+  onStar,
+  isStarred,
 }: Props) {
   return (
     <Modal
@@ -92,6 +98,34 @@ export default function ContextMenu({
               </TouchableOpacity>
 
               <View style={s.divider} />
+
+              {/* Forward */}
+              {onForward && (
+                <>
+                  <TouchableOpacity style={s.menuItem} onPress={onForward}>
+                    <Forward size={18} color="#333" />
+                    <Text style={s.menuItemText}>Forward</Text>
+                  </TouchableOpacity>
+                  <View style={s.divider} />
+                </>
+              )}
+
+              {/* Star */}
+              {onStar && (
+                <>
+                  <TouchableOpacity style={s.menuItem} onPress={onStar}>
+                    <Star
+                      size={18}
+                      color={isStarred ? "#eab308" : "#333"}
+                      fill={isStarred ? "#eab308" : "none"}
+                    />
+                    <Text style={s.menuItemText}>
+                      {isStarred ? "Unstar" : "Star"}
+                    </Text>
+                  </TouchableOpacity>
+                  <View style={s.divider} />
+                </>
+              )}
 
               {/* Copy */}
               <TouchableOpacity style={s.menuItem} onPress={onCopy}>

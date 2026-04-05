@@ -22,6 +22,7 @@ import {
 } from "@expo-google-fonts/outfit";
 
 import Colors from "./constants/colors";
+import { useAppTheme } from "./constants/ThemeContext";
 import { HomeHeader } from "./components/HomeHeader";
 import { FriendRow } from "./components/FriendRow";
 import { RequestRow } from "./components/RequestRow";
@@ -33,8 +34,10 @@ import { getSecretKey, hasSecretKey } from "./home_compo/Hiddenchats";
 import { Friend, Tab, TALKUP_USER_ID } from "./home_compo/types";
 import { ActionModal } from "./components/Actionmodal";
 import { SetSecretKeyModal } from "./components/Setsecretkeymodal";
+import { getPinnedChats } from "./home_compo/pinnedChats";
 
 const HomeScreen = forwardRef<View>((props, ref) => {
+  const { colors, isDark } = useAppTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
 
@@ -45,6 +48,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
   const [actionTarget, setActionTarget] = useState<Friend | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Friend | null>(null);
   const [showSetKey, setShowSetKey] = useState(false);
+  const [pinnedIds, setPinnedIds] = useState<string[]>([]);
   const pendingHideId = useRef<string | null>(null);
 
   const {
@@ -90,6 +94,13 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     }
   }, [currentUserId]);
 
+  // ── Load pinned chats ────────────────────────────────────────────────────────
+  useEffect(() => {
+    getPinnedChats().then(setPinnedIds);
+  }, [friends]);
+
+  const refreshPins = () => getPinnedChats().then(setPinnedIds);
+
   // ── Secret key check ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!searchQuery.trim()) {
@@ -120,6 +131,15 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     }
 
     return talkUpRow ? [talkUpRow, ...filtered] : filtered;
+  })();
+
+  // Sort pinned to top
+  const sortedFriends = (() => {
+    const pinSet = new Set(pinnedIds);
+    const pinned = visibleFriends.filter((f) => pinSet.has(f.id));
+    const unpinned = visibleFriends.filter((f) => !pinSet.has(f.id) && !f.isTalkUp);
+    const talkUp = visibleFriends.find((f) => f.isTalkUp);
+    return [...(talkUp ? [talkUp] : []), ...pinned, ...unpinned];
   })();
 
   // ── Long press guard for TalkUp ───────────────────────────────────────────────
@@ -161,6 +181,8 @@ const HomeScreen = forwardRef<View>((props, ref) => {
   };
 
   if (!fontsLoaded) return null;
+
+  const styles = useStyles(colors);
 
   return (
     <View ref={ref} style={styles.container}>
@@ -254,12 +276,13 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           </Animated.View>
         ) : (
           <FlatList
-            data={visibleFriends}
+            data={sortedFriends}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
               <FriendRow
                 item={item}
                 onLongPress={() => onFriendLongPress(item)}
+                isPinned={pinnedIds.includes(item.id)}
               />
             )}
             showsVerticalScrollIndicator={false}
@@ -283,6 +306,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
         onUnhide={handleUnhideChat}
         onDelete={(f) => setDeleteTarget(f)}
         onCancel={() => setActionTarget(null)}
+        onPinToggle={refreshPins}
       />
 
       <DeleteModal
@@ -307,51 +331,52 @@ const HomeScreen = forwardRef<View>((props, ref) => {
 HomeScreen.displayName = "HomeScreen";
 export default HomeScreen;
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  body: {
-    flex: 1,
-    backgroundColor: Colors.background,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    marginTop: -24,
-    paddingTop: 24,
-  },
-  sectionTitle: {
-    fontFamily: "Outfit_700Bold",
-    fontSize: 14,
-    color: Colors.neutral500,
-    paddingHorizontal: 24,
-    marginBottom: 8,
-  },
-  separator: {
-    height: 1,
-    backgroundColor: Colors.neutral200,
-    marginHorizontal: 28,
-  },
-  divider: { height: 8, backgroundColor: Colors.neutral100, marginVertical: 8 },
-  tabRow: {
-    flexDirection: "row",
-    marginHorizontal: 24,
-    marginBottom: 16,
-    backgroundColor: Colors.neutral200,
-    borderRadius: 50,
-    padding: 4,
-    gap: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 50,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  tabActive: { backgroundColor: Colors.primary },
-  tabText: {
-    fontFamily: "Outfit_600SemiBold",
-    fontSize: 14,
-    color: Colors.neutral500,
-  },
-  tabTextActive: { color: Colors.black },
-  listContent: { paddingHorizontal: 20, paddingBottom: 20 },
-});
+const useStyles = (colors: any) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.background },
+    body: {
+      flex: 1,
+      backgroundColor: colors.background,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      marginTop: -24,
+      paddingTop: 24,
+    },
+    sectionTitle: {
+      fontFamily: "Outfit_700Bold",
+      fontSize: 14,
+      color: colors.neutral500,
+      paddingHorizontal: 24,
+      marginBottom: 8,
+    },
+    separator: {
+      height: 1,
+      backgroundColor: colors.separator,
+      marginHorizontal: 28,
+    },
+    divider: { height: 8, backgroundColor: colors.neutral100, marginVertical: 8 },
+    tabRow: {
+      flexDirection: "row",
+      marginHorizontal: 24,
+      marginBottom: 16,
+      backgroundColor: colors.neutral200,
+      borderRadius: 50,
+      padding: 4,
+      gap: 4,
+    },
+    tab: {
+      flex: 1,
+      paddingVertical: 12,
+      borderRadius: 50,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    tabActive: { backgroundColor: colors.primary },
+    tabText: {
+      fontFamily: "Outfit_600SemiBold",
+      fontSize: 14,
+      color: colors.neutral500,
+    },
+    tabTextActive: { color: colors.black },
+    listContent: { paddingHorizontal: 20, paddingBottom: 20 },
+  });

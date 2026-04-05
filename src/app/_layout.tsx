@@ -4,6 +4,7 @@ import { Slot, router } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Splash from "./components/splash";
 import AppLockGate from "./AppLockGate";
+import { ThemeProvider } from "./constants/ThemeContext";
 
 const Layout = forwardRef<View>((props, ref) => {
   const [showSplash, setShowSplash] = useState(true);
@@ -96,9 +97,11 @@ Layout.displayName = "Layout";
 
 export default function RootLayout() {
   return (
-    <AppLockGate>
-      <Layout />
-    </AppLockGate>
+    <ThemeProvider>
+      <AppLockGate>
+        <Layout />
+      </AppLockGate>
+    </ThemeProvider>
   );
 }
 

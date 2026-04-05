@@ -203,6 +203,7 @@ const buildTalkUpRow = async (
     last_message_time: lastMsg?.created_at
       ? formatTime(lastMsg.created_at)
       : "",
+    last_message_timestamp: lastMsg?.created_at || "",
     unread_count: unread?.length ?? 0,
     last_seen: null,
     isTalkUp: true,
@@ -264,12 +265,17 @@ export const fetchFriendsWithMessages = async (
         last_message_time: lastMsg?.created_at
           ? formatTime(lastMsg.created_at)
           : "",
+        last_message_timestamp: lastMsg?.created_at || "",
         unread_count: unread?.length ?? 0,
       };
     }),
   );
 
-  const sorted = enriched.sort((a, b) => (a.last_message_time ? -1 : 1));
+  const sorted = enriched.sort((a, b) => {
+    const timeA = a.last_message_timestamp ? new Date(a.last_message_timestamp).getTime() : 0;
+    const timeB = b.last_message_timestamp ? new Date(b.last_message_timestamp).getTime() : 0;
+    return timeB - timeA;
+  });
   return [talkUpRow, ...sorted];
 };
 
