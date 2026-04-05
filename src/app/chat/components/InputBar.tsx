@@ -17,6 +17,7 @@ import {
   Sparkles,
   Mic,
   Smile,
+  PartyPopper,
 } from "lucide-react-native";
 import { ChatTheme } from "../../../lib/themes";
 import { Stickers } from "../stickers";
@@ -29,10 +30,11 @@ interface Props {
   onSend: () => void;
   onImagePick: () => void;
   onStickerSend?: (sticker: Stickers) => void;
+  onGiftPress: () => void;
   sending: boolean;
   inputHeight: number;
   onContentSizeChange: (
-    e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>
+    e: NativeSyntheticEvent<TextInputContentSizeChangeEventData>,
   ) => void;
   theme: ChatTheme;
   isImageTheme: boolean;
@@ -49,12 +51,14 @@ export default function InputBar({
   onSend,
   onImagePick,
   onStickerSend,
+  onGiftPress,
   sending,
   inputHeight,
   onContentSizeChange,
   theme,
   isImageTheme,
   userId,
+  
 }: Props) {
   const [stickerVisible, setStickerVisible] = useState(false);
   const [fixing, setFixing] = useState(false);
@@ -62,7 +66,7 @@ export default function InputBar({
 
   const resolvedInputHeight = Math.max(
     MIN_INPUT_HEIGHT,
-    Math.min(MAX_INPUT_HEIGHT, inputHeight)
+    Math.min(MAX_INPUT_HEIGHT, inputHeight),
   );
 
   useEffect(() => {
@@ -151,8 +155,6 @@ export default function InputBar({
 
           {/* Right Side - Icons */}
           <View style={s.rightIcons}>
-
-            {/* Sticker + Mic + Smile - hide when typing */}
             <Animated.View
               style={{
                 flexDirection: "row",
@@ -184,11 +186,11 @@ export default function InputBar({
               </TouchableOpacity>
 
               <TouchableOpacity
-                onPress={() => {}}
+                onPress={onGiftPress}
                 style={[s.iconBtn, { backgroundColor: `${theme.sendBtnBg}18` }]}
                 activeOpacity={0.7}
               >
-                <Mic size={20} color={theme.sendBtnBg} />
+                <PartyPopper size={20} color={theme.sendBtnBg} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -246,7 +248,6 @@ export default function InputBar({
                 )}
               </TouchableOpacity>
             </Animated.View>
-
           </View>
         </View>
       </View>
@@ -291,7 +292,7 @@ const s = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "flex-end",
-    width: 3 * 40 + 2 * 6, 
+    width: 3 * 40 + 2 * 6,
     marginBottom: 2,
   },
   textInput: {

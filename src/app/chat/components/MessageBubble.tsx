@@ -1,22 +1,23 @@
-import React, { useRef, useEffect, useCallback, useState } from "react";
+import * as FileSystem from "expo-file-system";
+import { Check, CheckCheck, ImageIcon, Reply } from "lucide-react-native";
+import React, { useRef } from "react";
 import {
-  View,
-  Text,
-  Image,
-  TouchableOpacity,
-  TouchableWithoutFeedback,
-  StyleSheet,
-  Dimensions,
   ActivityIndicator,
   Animated,
+  Dimensions,
+  Image,
   PanResponder,
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  Keyboard,
-  AppState,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View
 } from "react-native";
-import * as FileSystem from "expo-file-system";
+import { supabase } from "../../../lib/supabase";
+import { ChatTheme } from "../../../lib/themes";
+import { StickerBubble } from "../StickerBubble";
+import { Message, Reaction, ReplyTo } from "../utils/types";
+import { GiftBubble } from "./GiftBubble";
 
 const documentDirectory: string = (FileSystem as any).documentDirectory ?? "";
 const getInfoAsync = (FileSystem as any)
@@ -26,12 +27,6 @@ const readAsStringAsync = (FileSystem as any)
 const writeAsStringAsync = (FileSystem as any)
   .writeAsStringAsync as typeof FileSystem.writeAsStringAsync;
 const UTF8 = "utf8" as const;
-
-import { Check, CheckCheck, Reply, ImageIcon } from "lucide-react-native";
-import { ChatTheme } from "../../../lib/themes";
-import { supabase } from "../../../lib/supabase";
-import { Message, Reaction, ReplyTo } from "../utils/types";
-import { StickerBubble } from "../StickerBubble";
 
 export type { Message, Reaction, ReplyTo };
 
@@ -102,6 +97,7 @@ const formatDateLabel = (iso: string): string => {
 };
 
 const isStickerMsg = (msg: Message): boolean => msg.message_type === "sticker";
+const isGiftMsg = (msg: Message): boolean => msg.message_type === "gift"; // ← NEW
 
 const isImageContent = (msg: Message): boolean =>
   msg.message_type === "image" ||
@@ -155,14 +151,19 @@ export function MessageBubble({
   const isLast = !next || next.sender_id !== item.sender_id;
   const isDeleted = item.deleted_for_everyone;
   const isSticker = isStickerMsg(item);
-  const isImage = !isSticker && isImageContent(item);
+  const isGift = isGiftMsg(item); // ← NEW
+  const isImage = !isSticker && !isGift && isImageContent(item); // ← updated
   const emojiOnly =
-    !isDeleted && !isImage && !isSticker && isEmojiOnly(item.content);
+    !isDeleted &&
+    !isImage &&
+    !isSticker &&
+    !isGift &&
+    isEmojiOnly(item.content); // ← updated
 
   const showDateLabel =
     index === 0 ||
     new Date(item.created_at).toDateString() !==
-      new Date(messages[index - 1].created_at).toDateString();
+    new Date(messages[index - 1].created_at).toDateString();
 
   const reactionMap: Record<string, number> = {};
   (item.reactions || []).forEach((r) => {
@@ -567,8 +568,16 @@ export function MessageBubble({
             )}
 
             <View style={{ maxWidth: width * 0.72 }}>
-              {/* ── Sticker ── */}
-              {isSticker ? (
+              {/* ── GIFT (NEW — must be first) ── */}
+              {isGift ? (
+                <GiftBubble
+                  content={item.content}
+                  isMine={isMine}
+                  time={formatTime(item.created_at)}
+                  theme={theme}
+                  onLongPress={() => !isDeleted && onLongPress(item)}
+                />
+              ) : isSticker ? (
                 <StickerBubble
                   uri={item.content}
                   isMine={isMine}
@@ -617,21 +626,21 @@ export function MessageBubble({
                       s.bubble,
                       isMine
                         ? [
-                            s.myBubble,
-                            {
-                              backgroundColor: isDeleted
-                                ? "#f0f0f0"
-                                : theme.myBubbleBg,
-                            },
-                          ]
+                          s.myBubble,
+                          {
+                            backgroundColor: isDeleted
+                              ? "#f0f0f0"
+                              : theme.myBubbleBg,
+                          },
+                        ]
                         : [
-                            s.theirBubble,
-                            {
-                              backgroundColor: isDeleted
-                                ? "#f0f0f0"
-                                : theme.theirBubbleBg,
-                            },
-                          ],
+                          s.theirBubble,
+                          {
+                            backgroundColor: isDeleted
+                              ? "#f0f0f0"
+                              : theme.theirBubbleBg,
+                          },
+                        ],
                       isMine && isLast && s.myTail,
                       !isMine && isLast && s.theirTail,
                       isMine && isFirst && { borderTopRightRadius: 20 },
@@ -691,18 +700,18 @@ export function MessageBubble({
                         );
                         const newR = existing
                           ? current.filter(
-                              (r) =>
-                                !(
-                                  r.user_id === currentUserId &&
-                                  r.emoji === emoji
-                                ),
-                            )
-                          : [
-                              ...current.filter(
-                                (r) => r.user_id !== currentUserId,
+                            (r) =>
+                              !(
+                                r.user_id === currentUserId &&
+                                r.emoji === emoji
                               ),
-                              { emoji, user_id: currentUserId },
-                            ];
+                          )
+                          : [
+                            ...current.filter(
+                              (r) => r.user_id !== currentUserId,
+                            ),
+                            { emoji, user_id: currentUserId },
+                          ];
                         setMessages((prev) =>
                           prev.map((m) =>
                             m.id === item.id ? { ...m, reactions: newR } : m,
@@ -727,186 +736,6 @@ export function MessageBubble({
         </Animated.View>
       </View>
     </View>
-  );
-}
-
-export interface ChatScreenProps {
-  conversationId: string;
-  currentUserId: string;
-  username: string;
-  avatar_url: string;
-  theme: ChatTheme;
-  onLongPress: (msg: Message) => void;
-  onImagePress: (url: string, urls?: string[]) => void;
-  onSwipeReply: (msg: Message) => void;
-  renderInputBar: () => React.ReactNode;
-  keyboardVerticalOffset?: number;
-}
-
-export function ChatScreen({
-  conversationId,
-  currentUserId,
-  username,
-  avatar_url,
-  theme,
-  onLongPress,
-  onImagePress,
-  onSwipeReply,
-  renderInputBar,
-  keyboardVerticalOffset = 90,
-}: ChatScreenProps) {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [cacheLoaded, setCacheLoaded] = useState(false);
-  const flatListRef = useRef<FlatList<Message>>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const cached = await readCacheFile(conversationId);
-      if (!cancelled && cached.length > 0) setMessages(cached);
-      if (!cancelled) setCacheLoaded(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [conversationId]);
-
-  useEffect(() => {
-    if (!cacheLoaded) return;
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("conversation_id", conversationId)
-        .order("created_at", { ascending: true })
-        .limit(100);
-      if (error || !data || cancelled) return;
-      setMessages((prev) => {
-        const merged = mergeMessages(prev, data as Message[]);
-        writeCacheFile(conversationId, merged);
-        return merged;
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cacheLoaded, conversationId]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel(`chat:${conversationId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "messages",
-          filter: `conversation_id=eq.${conversationId}`,
-        },
-        (payload) => {
-          const incoming = payload.new as Message;
-          setMessages((prev) => {
-            let updated: Message[];
-            if (payload.eventType === "DELETE") {
-              updated = prev.filter((m) => m.id !== payload.old.id);
-            } else {
-              const exists = prev.some((m) => m.id === incoming.id);
-              updated = exists
-                ? prev.map((m) => (m.id === incoming.id ? incoming : m))
-                : [...prev, incoming];
-            }
-            writeCacheFile(conversationId, updated);
-            return updated;
-          });
-        },
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [conversationId]);
-
-  const scrollToBottom = useCallback((animated = true) => {
-    flatListRef.current?.scrollToEnd({ animated });
-  }, []);
-
-  useEffect(() => {
-    if (messages.length === 0) return;
-    const t = setTimeout(() => scrollToBottom(true), 80);
-    return () => clearTimeout(t);
-  }, [messages.length, scrollToBottom]);
-
-  useEffect(() => {
-    const sub = Keyboard.addListener("keyboardDidShow", () =>
-      scrollToBottom(true),
-    );
-    return () => sub.remove();
-  }, [scrollToBottom]);
-
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (state) => {
-      if (state === "background" || state === "inactive")
-        writeCacheFile(conversationId, messages);
-    });
-    return () => sub.remove();
-  }, [conversationId, messages]);
-
-  const renderItem = useCallback(
-    ({ item, index }: { item: Message; index: number }) => (
-      <MessageBubble
-        item={item}
-        index={index}
-        messages={messages}
-        currentUserId={currentUserId}
-        username={username}
-        avatar_url={avatar_url}
-        theme={theme}
-        onLongPress={onLongPress}
-        onImagePress={onImagePress}
-        onSwipeReply={onSwipeReply}
-        setMessages={setMessages}
-      />
-    ),
-    [
-      messages,
-      currentUserId,
-      username,
-      avatar_url,
-      theme,
-      onLongPress,
-      onImagePress,
-      onSwipeReply,
-    ],
-  );
-
-  const keyExtractor = useCallback((item: Message) => item.id, []);
-
-  return (
-    <KeyboardAvoidingView
-      style={cs.flex}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={
-        Platform.OS === "ios" ? keyboardVerticalOffset : 0
-      }
-    >
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderItem}
-        keyExtractor={keyExtractor}
-        contentContainerStyle={cs.listContent}
-        automaticallyAdjustKeyboardInsets
-        keyboardDismissMode="interactive"
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-        onContentSizeChange={() => scrollToBottom(true)}
-        removeClippedSubviews
-        windowSize={10}
-        maxToRenderPerBatch={15}
-        initialNumToRender={20}
-      />
-      <View>{renderInputBar()}</View>
-    </KeyboardAvoidingView>
   );
 }
 

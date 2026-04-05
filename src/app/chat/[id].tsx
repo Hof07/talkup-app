@@ -25,6 +25,8 @@ import {
   Outfit_700Bold,
   Outfit_600SemiBold,
 } from "@expo-google-fonts/outfit";
+// import { SpecialMessagePicker } from "./components/SpecialMessagePicker";
+import { GiftMessageComposer } from "./components/GiftMessageComposer";
 import { Lock, X, ChevronLeft, ChevronRight } from "lucide-react-native";
 
 import { MessageBubble, Message, ReplyTo } from "./components/MessageBubble";
@@ -41,6 +43,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useChat } from "./hooks/useChat";
 import { useTheme } from "./hooks/useTheme";
 import ChatHeader from "./components/ChatHeader";
+import { SpecialMessagePicker } from "./components/SpecialMessagePicker";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 
@@ -225,8 +228,12 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const [forwardVisible, setForwardVisible] = useState(false);
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
 
-  // ── Starred messages ──────────────────────────────────────────────────────
+  // ── Starred messages
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
+
+  // handle special msg ──────────────────────────────────────────────
+  const [pickerVisible, setPickerVisible] = useState(false);
+  const [composerVisible, setComposerVisible] = useState(false);
 
   const {
     messages,
@@ -258,7 +265,12 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     Outfit_700Bold,
     Outfit_600SemiBold,
   });
-
+  const handleGiftSend = async (message: string) => {
+    setComposerVisible(false);
+    userScrolledUp.current = false;
+    await sendMessage(message, replyTo, "gift");
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+  };
   useEffect(() => {
     init();
     const showL = Keyboard.addListener(
@@ -436,7 +448,11 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const handleJumpToMessage = (messageId: string) => {
     const index = messages.findIndex((m) => m.id === messageId);
     if (index >= 0 && flatListRef.current) {
-      flatListRef.current.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+      flatListRef.current.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
     }
   };
 
@@ -613,7 +629,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
               </Text>
             </View>
           )}
-
           ListHeaderComponent={() =>
             loadingMore ? (
               <ActivityIndicator
@@ -641,6 +656,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         onChangeText={handleTyping}
         onSend={handleSend}
         onImagePick={handleImagePick}
+        onGiftPress={() => setPickerVisible(true)}
         sending={sending}
         inputHeight={inputHeight}
         onContentSizeChange={(e: any) =>
@@ -688,13 +704,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
             />
           ) : (
             <ChatHeader
-            username={username as string}
-            avatar_url={avatar_url as string}
-            friendLastSeen={friendLastSeen}
-            theme={theme}
-            headerBgColor={headerBgColor}
-            onDotsPress={openDotsMenu}
-          />
+              username={username as string}
+              avatar_url={avatar_url as string}
+              friendLastSeen={friendLastSeen}
+              theme={theme}
+              headerBgColor={headerBgColor}
+              onDotsPress={openDotsMenu}
+            />
           )}
           <View style={[s.e2eBanner, { backgroundColor: e2eBgColor }]}>
             <Lock size={11} color={theme.dateLabelText} />
@@ -716,13 +732,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
             />
           ) : (
             <ChatHeader
-            username={username as string}
-            avatar_url={avatar_url as string}
-            friendLastSeen={friendLastSeen}
-            theme={theme}
-            headerBgColor={theme.headerBg}
-            onDotsPress={openDotsMenu}
-          />
+              username={username as string}
+              avatar_url={avatar_url as string}
+              friendLastSeen={friendLastSeen}
+              theme={theme}
+              headerBgColor={theme.headerBg}
+              onDotsPress={openDotsMenu}
+            />
           )}
           <View style={[s.e2eBanner, { backgroundColor: theme.inputBarBg }]}>
             <Lock size={11} color={theme.dateLabelText} />
@@ -784,6 +800,25 @@ const ChatScreen = forwardRef<View>((props, ref) => {
           setForwardMsg(null);
           Alert.alert("Forwarded", "Message sent!");
         }}
+      />
+      <SpecialMessagePicker
+        visible={pickerVisible}
+        onClose={() => setPickerVisible(false)}
+        onSelect={(type) => {
+          setPickerVisible(false);
+          if (type.id === "gift")
+            setTimeout(() => setComposerVisible(true), 300);
+        }}
+        theme={theme}
+      />
+      <GiftMessageComposer
+        visible={composerVisible}
+        onBack={() => {
+          setComposerVisible(false);
+          setTimeout(() => setPickerVisible(true), 300);
+        }}
+        onSend={handleGiftSend}
+        theme={theme}
       />
       <GalleryViewer
         visible={galleryVisible}

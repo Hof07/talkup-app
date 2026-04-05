@@ -44,11 +44,29 @@ export const useChat = (friendId: string) => {
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
+  const shouldSkipEncryption = (msg: Message): boolean => {
+    if (msg.deleted_for_everyone) return true;
+    if (
+      msg.message_type === "image" ||
+      msg.message_type === "image_group" ||
+      msg.message_type === "gift"
+    ) return true;
+    // plain URL (image sent as text)
+    if (
+      typeof msg.content === "string" &&
+      (msg.content.startsWith("http") || msg.content.startsWith("file://"))
+    ) return true;
+    // pure emoji — no letters or numbers
+    if (
+      typeof msg.content === "string" &&
+      /^[\p{Emoji}\p{Emoji_Presentation}\s]+$/u.test(msg.content.trim())
+    ) return true;
+    return false;
+  };
   const decryptMsg = (msg: Message): Message => {
     if (msg.deleted_for_everyone)
       return { ...msg, content: "__deleted__" };
-    if (msg.message_type === "image" || msg.message_type === "image_group")
-      return msg;
+    if (shouldSkipEncryption(msg)) return msg;
     try {
       return {
         ...msg,
@@ -58,7 +76,6 @@ export const useChat = (friendId: string) => {
       return msg;
     }
   };
-
   const init = async () => {
     try {
       const sessionStr = await AsyncStorage.getItem("userSession");
@@ -153,7 +170,7 @@ export const useChat = (friendId: string) => {
       .eq("sender_id", friendId)
       .eq("receiver_id", uid)
       .eq("is_read", false)
-      .then(() => {});
+      .then(() => { });
   };
 
   const loadMoreMessages = async () => {
@@ -249,7 +266,7 @@ export const useChat = (friendId: string) => {
               .from("messages")
               .update({ is_read: true })
               .eq("id", msg.id)
-              .then(() => {});
+              .then(() => { });
         }
       )
       .on(
@@ -269,14 +286,14 @@ export const useChat = (friendId: string) => {
             prev.map((m) =>
               m.id === updated.id
                 ? {
-                    ...m,
-                    is_read: updated.is_read,
-                    reactions: updated.reactions,
-                    deleted_for_everyone: updated.deleted_for_everyone,
-                    content: updated.deleted_for_everyone
-                      ? "🚫 This message was deleted"
-                      : m.content,
-                  }
+                  ...m,
+                  is_read: updated.is_read,
+                  reactions: updated.reactions,
+                  deleted_for_everyone: updated.deleted_for_everyone,
+                  content: updated.deleted_for_everyone
+                    ? "🚫 This message was deleted"
+                    : m.content,
+                }
                 : m
             )
           );
@@ -310,7 +327,7 @@ export const useChat = (friendId: string) => {
     });
   };
 
-  const sendMessage = async (plainText: string, replyTo?: ReplyTo | null) => {
+  const sendMessage = async (plainText: string, replyTo?: ReplyTo | null, messageType = "text") => {
     const uid = currentUserIdRef.current;
     broadcastStopTyping();
     setSending(true);
@@ -328,11 +345,18 @@ export const useChat = (friendId: string) => {
           created_at: new Date().toISOString(),
           is_read: false,
           is_temp: true,
-          message_type: "text" as const,
+          message_type: messageType as Message["message_type"],
           reply_to: replyTo || null,
         },
       ])
     );
+    const isPlainUrl =
+      plainText.startsWith("http") || plainText.startsWith("file://");
+    const isPureEmoji =
+      /^[\p{Emoji}\p{Emoji_Presentation}\s]+$/u.test(plainText.trim());
+    const skipEncrypt =
+      messageType === "gift" || isPlainUrl || isPureEmoji;
+
 
     const { data, error } = await supabase
       .from("messages")
@@ -340,9 +364,9 @@ export const useChat = (friendId: string) => {
         {
           sender_id: uid,
           receiver_id: friendId,
-          content: encryptMessage(plainText, chatKeyRef.current),
+          content: skipEncrypt ? plainText : encryptMessage(plainText, chatKeyRef.current),
           is_read: false,
-          message_type: "text",
+          message_type: messageType,
           reply_to: replyTo || null,
         },
       ])
@@ -358,11 +382,11 @@ export const useChat = (friendId: string) => {
           prev.map((m) =>
             m.id === tempId
               ? {
-                  ...data,
-                  content: plainText,
-                  is_temp: false,
-                  reply_to: replyTo || null,
-                }
+                ...data,
+                content: plainText,
+                is_temp: false,
+                reply_to: replyTo || null,
+              }
               : m
           )
         )
@@ -446,22 +470,22 @@ export const useChat = (friendId: string) => {
 
       const messagePayload = isMultiple
         ? {
-            sender_id: uid,
-            receiver_id: receiverId,
-            content: uploadedUrls[0],
-            images: uploadedUrls,
-            message_type: "image_group",
-            is_read: false,
-            reply_to: replyTo || null,
-          }
+          sender_id: uid,
+          receiver_id: receiverId,
+          content: uploadedUrls[0],
+          images: uploadedUrls,
+          message_type: "image_group",
+          is_read: false,
+          reply_to: replyTo || null,
+        }
         : {
-            sender_id: uid,
-            receiver_id: receiverId,
-            content: uploadedUrls[0],
-            message_type: "image",
-            is_read: false,
-            reply_to: replyTo || null,
-          };
+          sender_id: uid,
+          receiver_id: receiverId,
+          content: uploadedUrls[0],
+          message_type: "image",
+          is_read: false,
+          reply_to: replyTo || null,
+        };
 
       const { data, error } = await supabase
         .from("messages")
@@ -478,15 +502,15 @@ export const useChat = (friendId: string) => {
             prev.map((m) =>
               m.id === tempId
                 ? {
-                    ...data,
-                    content: uploadedUrls[0],
-                    images: isMultiple ? uploadedUrls : undefined,
-                    is_temp: false,
-                    message_type: (isMultiple
-                      ? "image_group"
-                      : "image") as "image" | "image_group",
-                    reply_to: replyTo || null,
-                  }
+                  ...data,
+                  content: uploadedUrls[0],
+                  images: isMultiple ? uploadedUrls : undefined,
+                  is_temp: false,
+                  message_type: (isMultiple
+                    ? "image_group"
+                    : "image") as "image" | "image_group",
+                  reply_to: replyTo || null,
+                }
                 : m
             )
           )
@@ -518,7 +542,7 @@ export const useChat = (friendId: string) => {
       .from("messages")
       .update({ reactions: newReactions })
       .eq("id", msg.id)
-      .then(() => {});
+      .then(() => { });
   };
 
   const deleteMessage = async (msg: Message, forEveryone: boolean) => {
@@ -535,7 +559,7 @@ export const useChat = (friendId: string) => {
         .from("messages")
         .update({ deleted_for_everyone: true })
         .eq("id", msg.id)
-        .then(() => {});
+        .then(() => { });
     } else {
       const deletedFor = [...(msg.deleted_for || []), uid];
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
@@ -543,7 +567,7 @@ export const useChat = (friendId: string) => {
         .from("messages")
         .update({ deleted_for: deletedFor })
         .eq("id", msg.id)
-        .then(() => {});
+        .then(() => { });
     }
   };
 
@@ -560,7 +584,7 @@ export const useChat = (friendId: string) => {
       .or(
         `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`
       )
-      .then(() => {});
+      .then(() => { });
   };
 
   const cleanup = () => {

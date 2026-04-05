@@ -7,7 +7,7 @@ export interface ReplyTo {
   id: string;
   content: string;
   sender_id: string;
-  message_type?: "text" | "image" | "image_group" | "sticker";
+  message_type?: "text" | "image" | "image_group" | "sticker" | "gift";
 }
 
 export interface Message {
@@ -21,7 +21,7 @@ export interface Message {
   reactions?: Reaction[];
   deleted_for?: string[];
   deleted_for_everyone?: boolean;
-  message_type?: "text" | "image" | "image_group" | "sticker";
+  message_type?: "text" | "image" | "image_group" | "sticker" | "gift";
   images?: string[];
   reply_to?: ReplyTo | null;
 }
