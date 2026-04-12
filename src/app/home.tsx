@@ -1,41 +1,202 @@
 // ─── HomeScreen.tsx ───────────────────────────────────────────────────────────
-// When the logged-in user IS the TalkUp account, redirect to BroadcastScreen.
-// Everyone else sees the normal home screen.
-
-import { forwardRef, useEffect, useRef, useState } from "react";
+import {
+  Outfit_400Regular,
+  Outfit_600SemiBold,
+  Outfit_700Bold,
+} from "@expo-google-fonts/outfit";
+import { useFonts } from "expo-font";
+import { router } from "expo-router";
+import React, { forwardRef, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
   FlatList,
+  Image,
   RefreshControl,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
-import { router } from "expo-router";
-import { useFonts } from "expo-font";
-import {
-  Outfit_400Regular,
-  Outfit_600SemiBold,
-  Outfit_700Bold,
-} from "@expo-google-fonts/outfit";
 
+import { supabase } from "../lib/supabase";
+import { ActionModal } from "./components/Actionmodal";
+import { DeleteModal } from "./components/DeleteModal";
+import { EmptyState } from "./components/EmptyState";
+import { FriendRow } from "./components/FriendRow";
+import { HomeHeader } from "./components/HomeHeader";
+import { RequestRow } from "./components/RequestRow";
+import { SearchBar } from "./components/SearchBar";
+import { SetSecretKeyModal } from "./components/Setsecretkeymodal";
 import Colors from "./constants/colors";
 import { useAppTheme } from "./constants/ThemeContext";
-import { HomeHeader } from "./components/HomeHeader";
-import { FriendRow } from "./components/FriendRow";
-import { RequestRow } from "./components/RequestRow";
-import { EmptyState } from "./components/EmptyState";
-import { SearchBar } from "./components/SearchBar";
-import { DeleteModal } from "./components/DeleteModal";
-import { useHomeData } from "./home_compo/useHomeData";
 import { getSecretKey, hasSecretKey } from "./home_compo/Hiddenchats";
-import { Friend, Tab, TALKUP_USER_ID } from "./home_compo/types";
-import { ActionModal } from "./components/Actionmodal";
-import { SetSecretKeyModal } from "./components/Setsecretkeymodal";
 import { getPinnedChats } from "./home_compo/pinnedChats";
+import { Friend, FriendRequest, Tab, TALKUP_USER_ID } from "./home_compo/types";
+import { useHomeData } from "./home_compo/useHomeData";
 
+// ─── Story types ──────────────────────────────────────────────────────────────
+interface StoryItem {
+  user_id: string;
+  username: string;
+  avatar_url: string | null;
+  has_unseen: boolean;
+}
+
+// ─── StoryBar component ───────────────────────────────────────────────────────
+const StoryBar = ({
+  currentUserId,
+  colors,
+}: {
+  currentUserId: string;
+  colors: any;
+}) => {
+  const [stories, setStories] = useState<StoryItem[]>([]);
+
+  useEffect(() => {
+    fetchStories();
+  }, []);
+
+  const fetchStories = async (): Promise<void> => {
+    const now = new Date().toISOString();
+    const { data } = await supabase
+      .from("stories")
+      .select("user_id, users(username, avatar_url), story_views(viewer_id)")
+      .neq("user_id", currentUserId)
+      .gte("expires_at", now)
+      .order("created_at", { ascending: false });
+
+    if (!data) return;
+
+    const seen = new Set<string>();
+    const result: StoryItem[] = [];
+
+    for (const row of data as any[]) {
+      if (seen.has(row.user_id)) continue;
+      seen.add(row.user_id);
+      result.push({
+        user_id: row.user_id,
+        username: row.users?.username ?? "User",
+        avatar_url: row.users?.avatar_url ?? null,
+        has_unseen: !row.story_views?.some(
+          (v: any) => v.viewer_id === currentUserId
+        ),
+      });
+    }
+
+    setStories(result);
+  };
+
+  const allItems: StoryItem[] = [
+    {
+      user_id: "add",
+      username: "Your Story",
+      avatar_url: null,
+      has_unseen: false,
+    },
+    ...stories,
+  ];
+
+  return (
+    <View style={{ marginBottom: 8 }}>
+      <Text
+        style={{
+          fontFamily: "Outfit_700Bold",
+          fontSize: 13,
+          color: colors.neutral500,
+          paddingHorizontal: 24,
+          marginBottom: 10,
+          marginTop: 4,
+        }}
+      >
+        Stories
+      </Text>
+      <FlatList<StoryItem>
+        data={allItems}
+        keyExtractor={(item) => item.user_id}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal: 20, gap: 16 }}
+        renderItem={({ item }) => {
+          const isAdd = item.user_id === "add";
+          return (
+            <TouchableOpacity
+              style={{ alignItems: "center", width: 64 }}
+              activeOpacity={0.75}
+              onPress={() =>
+                isAdd
+                  ? router.push("/add-story")
+                  : router.push({
+                    pathname: "/story/[id]",
+                    params: { id: item.user_id },
+                  })
+              }
+            >
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 32,
+                  padding: 2.5,
+                  borderWidth: 2.5,
+                  borderColor:
+                    item.has_unseen || isAdd
+                      ? Colors.primary
+                      : colors.neutral300,
+                  justifyContent: "center",
+                  alignItems: "center",
+                }}
+              >
+                {item.avatar_url ? (
+                  <Image
+                    source={{ uri: item.avatar_url }}
+                    style={{ width: 55, height: 55, borderRadius: 27.5 }}
+                  />
+                ) : (
+                  <View
+                    style={{
+                      width: 55,
+                      height: 55,
+                      borderRadius: 27.5,
+                      backgroundColor: colors.neutral200,
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        fontFamily: "Outfit_700Bold",
+                        fontSize: 20,
+                        color: colors.neutral600,
+                      }}
+                    >
+                      {isAdd ? "+" : item.username[0]?.toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text
+                style={{
+                  fontFamily: "Outfit_400Regular",
+                  fontSize: 11,
+                  color: colors.neutral500,
+                  marginTop: 5,
+                  width: 64,
+                  textAlign: "center",
+                }}
+                numberOfLines={1}
+              >
+                {isAdd ? "Add" : item.username}
+              </Text>
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </View>
+  );
+};
+
+// ─── HomeScreen ───────────────────────────────────────────────────────────────
 const HomeScreen = forwardRef<View>((props, ref) => {
   const { colors, isDark } = useAppTheme();
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -87,69 +248,68 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     ]).start();
   }, []);
 
-  // ── If this IS the TalkUp account, redirect to broadcast screen ──────────────
   useEffect(() => {
     if (currentUserId && currentUserId === TALKUP_USER_ID) {
       router.replace("/broadcast");
     }
   }, [currentUserId]);
 
-  // ── Load pinned chats ────────────────────────────────────────────────────────
   useEffect(() => {
-    getPinnedChats().then(setPinnedIds);
+    getPinnedChats().then((ids: string[]) => setPinnedIds(ids));
   }, [friends]);
 
-  const refreshPins = () => getPinnedChats().then(setPinnedIds);
+  const refreshPins = (): void => {
+    getPinnedChats().then((ids: string[]) => setPinnedIds(ids));
+  };
 
-  // ── Secret key check ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!searchQuery.trim()) {
       setSecretUnlocked(false);
       return;
     }
-    getSecretKey().then((savedKey) => {
+    getSecretKey().then((savedKey: string | null) => {
       setSecretUnlocked(!!savedKey && searchQuery.trim() === savedKey);
     });
   }, [searchQuery]);
 
-  // ── Filter logic ──────────────────────────────────────────────────────────────
-  const visibleFriends = (() => {
-    const talkUpRow = friends.find((f) => f.isTalkUp);
-    const rest = friends.filter((f) => !f.isTalkUp);
+  const visibleFriends: Friend[] = (() => {
+    const talkUpRow = friends.find((f: Friend) => f.isTalkUp);
+    const rest = friends.filter((f: Friend) => !f.isTalkUp);
 
     let filtered: Friend[];
     if (secretUnlocked) {
       filtered = rest;
     } else if (searchQuery.trim()) {
       filtered = rest.filter(
-        (f) =>
+        (f: Friend) =>
           !f.isHidden &&
-          f.username.toLowerCase().includes(searchQuery.toLowerCase()),
+          f.username.toLowerCase().includes(searchQuery.toLowerCase())
       );
     } else {
-      filtered = rest.filter((f) => !f.isHidden);
+      filtered = rest.filter((f: Friend) => !f.isHidden);
     }
 
     return talkUpRow ? [talkUpRow, ...filtered] : filtered;
   })();
 
-  // Sort pinned to top
-  const sortedFriends = (() => {
+  const sortedFriends: Friend[] = (() => {
     const pinSet = new Set(pinnedIds);
-    const pinned = visibleFriends.filter((f) => pinSet.has(f.id));
-    const unpinned = visibleFriends.filter((f) => !pinSet.has(f.id) && !f.isTalkUp);
-    const talkUp = visibleFriends.find((f) => f.isTalkUp);
+    const talkUp = visibleFriends.find((f: Friend) => f.isTalkUp);
+    const pinned = visibleFriends.filter(
+      (f: Friend) => pinSet.has(f.id) && !f.isTalkUp
+    );
+    const unpinned = visibleFriends.filter(
+      (f: Friend) => !pinSet.has(f.id) && !f.isTalkUp
+    );
     return [...(talkUp ? [talkUp] : []), ...pinned, ...unpinned];
   })();
 
-  // ── Long press guard for TalkUp ───────────────────────────────────────────────
-  const onFriendLongPress = (item: Friend) => {
+  const onFriendLongPress = (item: Friend): void => {
     if (item.isTalkUp) return;
     setActionTarget(item);
   };
 
-  // ── Hide chat ─────────────────────────────────────────────────────────────────
-  const tryHideChat = async (friendId: string) => {
+  const tryHideChat = async (friendId: string): Promise<void> => {
     const keyExists = await hasSecretKey();
     if (!keyExists) {
       pendingHideId.current = friendId;
@@ -159,7 +319,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     }
   };
 
-  const onKeySet = () => {
+  const onKeySet = (): void => {
     setShowSetKey(false);
     if (pendingHideId.current) {
       handleHideChat(pendingHideId.current);
@@ -167,14 +327,13 @@ const HomeScreen = forwardRef<View>((props, ref) => {
     }
   };
 
-  // ── Delete confirm ────────────────────────────────────────────────────────────
-  const confirmDelete = async () => {
+  const confirmDelete = async (): Promise<void> => {
     if (!deleteTarget) return;
     await handleDeleteFriend(deleteTarget.id);
     setDeleteTarget(null);
   };
 
-  const closeSearch = () => {
+  const closeSearch = (): void => {
     setSearchVisible(false);
     setSearchQuery("");
     setSecretUnlocked(false);
@@ -197,6 +356,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
       />
 
       <View style={styles.body}>
+        {/* ── Search bar ── */}
         {searchVisible && (
           <SearchBar
             value={searchQuery}
@@ -206,12 +366,13 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           />
         )}
 
+        {/* ── Friend requests ── */}
         {!searchVisible && pendingRequests.length > 0 && (
           <Animated.View style={{ opacity: fadeAnim }}>
             <Text style={styles.sectionTitle}>
               Friend Requests ({pendingRequests.length})
             </Text>
-            <FlatList
+            <FlatList<FriendRequest>
               data={pendingRequests}
               keyExtractor={(item) => item.id}
               renderItem={({ item }) => (
@@ -228,6 +389,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           </Animated.View>
         )}
 
+        {/* ── DM / Group toggle ── */}
         {!searchVisible && (
           <Animated.View
             style={[
@@ -261,6 +423,15 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           </Animated.View>
         )}
 
+        {/* ── Story bar (DM tab only, not during search) ── */}
+        {!searchVisible && tab === "dm" && !!currentUserId && (
+          <Animated.View style={{ opacity: fadeAnim }}>
+            <StoryBar currentUserId={currentUserId} colors={colors} />
+            <View style={styles.storyDivider} />
+          </Animated.View>
+        )}
+
+        {/* ── Chat list ── */}
         {loading ? (
           <ActivityIndicator
             color={Colors.primary}
@@ -275,7 +446,7 @@ const HomeScreen = forwardRef<View>((props, ref) => {
             />
           </Animated.View>
         ) : (
-          <FlatList
+          <FlatList<Friend>
             data={sortedFriends}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
@@ -299,12 +470,15 @@ const HomeScreen = forwardRef<View>((props, ref) => {
         )}
       </View>
 
+      {/* ── White bar behind bottom navbar ── */}
+      <View style={styles.bottomBar} />
+
       <ActionModal
         friend={actionTarget}
         visible={!!actionTarget}
         onHide={tryHideChat}
         onUnhide={handleUnhideChat}
-        onDelete={(f) => setDeleteTarget(f)}
+        onDelete={(f: Friend) => setDeleteTarget(f)}
         onCancel={() => setActionTarget(null)}
         onPinToggle={refreshPins}
       />
@@ -354,7 +528,17 @@ const useStyles = (colors: any) =>
       backgroundColor: colors.separator,
       marginHorizontal: 28,
     },
-    divider: { height: 8, backgroundColor: colors.neutral100, marginVertical: 8 },
+    divider: {
+      height: 8,
+      backgroundColor: colors.neutral100,
+      marginVertical: 8,
+    },
+    storyDivider: {
+      height: 1,
+      backgroundColor: colors.separator,
+      marginHorizontal: 24,
+      marginBottom: 8,
+    },
     tabRow: {
       flexDirection: "row",
       marginHorizontal: 24,
@@ -379,4 +563,12 @@ const useStyles = (colors: any) =>
     },
     tabTextActive: { color: colors.black },
     listContent: { paddingHorizontal: 20, paddingBottom: 20 },
+    bottomBar: {
+      backgroundColor: colors.cardBackground ?? "#FFFFFF",
+      height: 30,
+      position: "absolute",
+      bottom: 0,
+      left: 0,
+      right: 0,
+    },
   });
