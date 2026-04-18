@@ -32,8 +32,7 @@ import { getSecretKey, hasSecretKey } from "./home_compo/Hiddenchats";
 import { getPinnedChats } from "./home_compo/pinnedChats";
 import { Friend, FriendRequest, Tab, TALKUP_USER_ID } from "./home_compo/types";
 import { useHomeData } from "./home_compo/useHomeData";
-import { StoryBar } from "./Storybar";
-// import { StoryBar } from "./StoryBar";
+// import { StoryBar } from "./Storybar"; // ← temporarily disabled
 
 // ─── HomeScreen ───────────────────────────────────────────────────────────────
 const HomeScreen = forwardRef<View>((props, ref) => {
@@ -241,13 +240,13 @@ const HomeScreen = forwardRef<View>((props, ref) => {
           </Animated.View>
         )}
 
-        {/* Story bar — shown on DM tab */}
+        {/* StoryBar temporarily disabled — re-enable after fixing crash
         {!searchVisible && tab === "dm" && !!currentUserId && (
           <Animated.View style={{ opacity: fadeAnim }}>
             <StoryBar currentUserId={currentUserId} colors={colors} />
             <View style={styles.storyDivider} />
           </Animated.View>
-        )}
+        )} */}
 
         {loading ? (
           <ActivityIndicator
