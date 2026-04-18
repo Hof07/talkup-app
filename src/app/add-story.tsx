@@ -1,6 +1,5 @@
 // ─── app/add-story.tsx ────────────────────────────────────────────────────────
-// Add story — pick image or video, preview, upload to Supabase storage
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -19,53 +18,102 @@ import {
   Outfit_600SemiBold,
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "@/lib/supabase";
 
-// ─── Video preview sub-component ─────────────────────────────────────────────
 function VideoPreview({ uri }: { uri: string }) {
   const player = useVideoPlayer(uri, (p) => {
     p.loop = true;
     p.muted = true;
     p.play();
   });
-
   return (
     <VideoView
       player={player}
-      style={styles.preview}
+      style={StyleSheet.absoluteFill}
       contentFit="cover"
       nativeControls={false}
     />
   );
 }
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
+// ── Restores the Supabase auth session from AsyncStorage ──────────────────────
+// Without this, auth.uid() is null in RLS policies even though the user is
+// "logged in" via our custom AsyncStorage session.
+async function restoreSupabaseSession(): Promise<string | null> {
+  try {
+    const sessionStr = await AsyncStorage.getItem("userSession");
+    if (!sessionStr) return null;
+
+    const session = JSON.parse(sessionStr);
+
+    // Set the session on the Supabase client so auth.uid() works in RLS
+    if (session?.access_token && session?.refresh_token) {
+      const { error } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+      if (error) {
+        console.warn("Failed to restore Supabase session:", error.message);
+        return null;
+      }
+    }
+
+    return session?.user?.id ?? null;
+  } catch (e) {
+    console.warn("restoreSupabaseSession error:", e);
+    return null;
+  }
+}
+
 export default function AddStory() {
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [mediaType, setMediaType] = useState<"image" | "video">("image");
-  const [uploading, setUploading] = useState<boolean>(false);
-
+  const [userId, setUserId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [fontsLoaded] = useFonts({
     Outfit_400Regular,
     Outfit_700Bold,
     Outfit_600SemiBold,
   });
 
-  // ── Pick image or video from gallery ─────────────────────────────────────
-  const pickMedia = async (): Promise<void> => {
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
+  // ── Load & restore session on mount ──────────────────────────────────────
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        // Restore session → this makes auth.uid() work for RLS
+        const uid = await restoreSupabaseSession();
+        if (uid) {
+          setUserId(uid);
+          return;
+        }
+
+        // Fallback: check if Supabase already has an active session
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData?.session?.user) {
+          setUserId(sessionData.session.user.id);
+        }
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    loadUser();
+  }, []);
+
+  // ── Gallery picker ────────────────────────────────────────────────────────
+  const openGallery = async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
       Alert.alert("Permission needed", "Please allow access to your gallery.");
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.All,
       quality: 0.85,
       videoMaxDuration: 30,
       allowsEditing: true,
     });
-
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
       setMediaUri(asset.uri);
@@ -73,22 +121,46 @@ export default function AddStory() {
     }
   };
 
-  // ── Upload to Supabase ────────────────────────────────────────────────────
-  const uploadStory = async (): Promise<void> => {
-    if (!mediaUri) return;
-    setUploading(true);
+  // ── Camera picker ─────────────────────────────────────────────────────────
+  const openCamera = async () => {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("Permission needed", "Please allow access to your camera.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      quality: 0.85,
+      videoMaxDuration: 30,
+      allowsEditing: true,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const asset = result.assets[0];
+      setMediaUri(asset.uri);
+      setMediaType(asset.type === "video" ? "video" : "image");
+    }
+  };
 
+  // ── Upload ────────────────────────────────────────────────────────────────
+  const uploadStory = async () => {
+    if (!mediaUri) return;
+
+    setUploading(true);
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) throw new Error("Not logged in");
+      // Re-restore session right before upload as a safety net
+      // (token could have been cleared between mount and button press)
+      const freshUid = await restoreSupabaseSession();
+      const activeUserId = freshUid ?? userId;
+
+      if (!activeUserId) {
+        Alert.alert("Not logged in", "You need to be logged in to post a story.");
+        return;
+      }
 
       const ext = mediaType === "video" ? "mp4" : "jpg";
-      const path = `${user.id}/${Date.now()}.${ext}`;
+      const path = `${activeUserId}/${Date.now()}.${ext}`;
       const mimeType = mediaType === "video" ? "video/mp4" : "image/jpeg";
 
-      // ✅ FormData approach — works with local file:// URIs in React Native
       const formData = new FormData();
       formData.append("file", {
         uri: mediaUri,
@@ -96,35 +168,30 @@ export default function AddStory() {
         name: `story.${ext}`,
       } as any);
 
-      // Upload to stories bucket
       const { error: uploadError } = await supabase.storage
         .from("stories")
         .upload(path, formData, { contentType: mimeType });
-
       if (uploadError) throw uploadError;
 
-      // Get public URL
       const {
         data: { publicUrl },
       } = supabase.storage.from("stories").getPublicUrl(path);
 
-      // Save record to stories table
       const { error: dbError } = await supabase.from("stories").insert({
-        user_id: user.id,
+        user_id: activeUserId,
         media_url: publicUrl,
         media_type: mediaType,
-        // expires_at is auto-set to now() + 24h by DB default
       });
-
       if (dbError) throw dbError;
 
       Alert.alert("Story posted! 🎉", "Your story is live for 24 hours.", [
         { text: "OK", onPress: () => router.back() },
       ]);
     } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Something went wrong";
-      Alert.alert("Upload failed", message);
+      Alert.alert(
+        "Upload failed",
+        err instanceof Error ? err.message : "Something went wrong"
+      );
     } finally {
       setUploading(false);
     }
@@ -134,7 +201,7 @@ export default function AddStory() {
 
   return (
     <View style={styles.container}>
-      {/* ── Header ── */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
           <Text style={styles.closeText}>✕</Text>
@@ -143,7 +210,7 @@ export default function AddStory() {
         <View style={{ width: 40 }} />
       </View>
 
-      {/* ── Preview or empty pick area ── */}
+      {/* Preview / Pick area */}
       {mediaUri ? (
         <View style={styles.previewBox}>
           {mediaType === "video" ? (
@@ -151,17 +218,13 @@ export default function AddStory() {
           ) : (
             <Image
               source={{ uri: mediaUri }}
-              style={styles.preview}
+              style={StyleSheet.absoluteFill}
               resizeMode="cover"
             />
           )}
-
-          {/* Change button overlay */}
-          <TouchableOpacity style={styles.changeBtn} onPress={pickMedia}>
+          <TouchableOpacity style={styles.changeBtn} onPress={openGallery}>
             <Text style={styles.changeBtnText}>Change</Text>
           </TouchableOpacity>
-
-          {/* Media type badge */}
           <View style={styles.typeBadge}>
             <Text style={styles.typeBadgeText}>
               {mediaType === "video" ? "🎬 Video" : "🖼 Photo"}
@@ -169,31 +232,55 @@ export default function AddStory() {
           </View>
         </View>
       ) : (
-        <TouchableOpacity
-          style={styles.pickArea}
-          onPress={pickMedia}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.pickIcon}>📷</Text>
-          <Text style={styles.pickTitle}>Choose Photo or Video</Text>
-          <Text style={styles.pickSub}>
-            Max 30 seconds for video • Max 50 MB
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.pickArea}>
+          <TouchableOpacity
+            style={styles.pickOption}
+            onPress={openCamera}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pickOptionIcon}>📷</Text>
+            <Text style={styles.pickOptionTitle}>Camera</Text>
+            <Text style={styles.pickOptionSub}>Take a photo or video</Text>
+          </TouchableOpacity>
+
+          <View style={styles.pickDivider}>
+            <View style={styles.pickDividerLine} />
+            <Text style={styles.pickDividerText}>or</Text>
+            <View style={styles.pickDividerLine} />
+          </View>
+
+          <TouchableOpacity
+            style={styles.pickOption}
+            onPress={openGallery}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.pickOptionIcon}>🖼</Text>
+            <Text style={styles.pickOptionTitle}>Gallery</Text>
+            <Text style={styles.pickOptionSub}>Max 30s video • Max 50 MB</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
-      {/* ── Action button ── */}
+      {/* Action button */}
       {mediaUri ? (
         <TouchableOpacity
-          style={[styles.actionBtn, uploading && styles.actionBtnDisabled]}
+          style={[
+            styles.actionBtn,
+            (uploading || authLoading) && styles.actionBtnDisabled,
+          ]}
           onPress={uploadStory}
-          disabled={uploading}
+          disabled={uploading || authLoading}
           activeOpacity={0.85}
         >
           {uploading ? (
             <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
               <ActivityIndicator color="#000" size="small" />
-              <Text style={styles.actionBtnText}>Uploading...</Text>
+              <Text style={styles.actionBtnText}>Uploading…</Text>
+            </View>
+          ) : authLoading ? (
+            <View style={{ flexDirection: "row", gap: 10, alignItems: "center" }}>
+              <ActivityIndicator color="#000" size="small" />
+              <Text style={styles.actionBtnText}>Loading…</Text>
             </View>
           ) : (
             <Text style={styles.actionBtnText}>Post Story</Text>
@@ -202,22 +289,18 @@ export default function AddStory() {
       ) : (
         <TouchableOpacity
           style={styles.actionBtn}
-          onPress={pickMedia}
+          onPress={openGallery}
           activeOpacity={0.85}
         >
-          <Text style={styles.actionBtnText}>Select Media</Text>
+          <Text style={styles.actionBtnText}>Select from Gallery</Text>
         </TouchableOpacity>
       )}
     </View>
   );
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0A0A0A",
-  },
+  container: { flex: 1, backgroundColor: "#0A0A0A" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -234,16 +317,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.1)",
     borderRadius: 20,
   },
-  closeText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-  },
-  title: {
-    fontFamily: "Outfit_700Bold",
-    fontSize: 18,
-    color: "#fff",
-  },
+  closeText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  title: { fontFamily: "Outfit_700Bold", fontSize: 18, color: "#fff" },
   previewBox: {
     flex: 1,
     marginHorizontal: 20,
@@ -251,10 +326,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     overflow: "hidden",
     backgroundColor: "#1A1A1A",
-  },
-  preview: {
-    width: "100%",
-    height: "100%",
   },
   changeBtn: {
     position: "absolute",
@@ -292,26 +363,46 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderRadius: 24,
     backgroundColor: "#1A1A1A",
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: "#2A2A2A",
-    borderStyle: "dashed",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  pickOption: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 8,
   },
-  pickIcon: { fontSize: 56 },
-  pickTitle: {
+  pickOptionIcon: { fontSize: 44 },
+  pickOptionTitle: {
     fontFamily: "Outfit_700Bold",
-    fontSize: 18,
+    fontSize: 17,
     color: "#fff",
   },
-  pickSub: {
+  pickOptionSub: {
     fontFamily: "Outfit_400Regular",
-    fontSize: 13,
+    fontSize: 12,
     color: "rgba(255,255,255,0.4)",
     textAlign: "center",
     paddingHorizontal: 40,
-    lineHeight: 20,
+  },
+  pickDivider: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 32,
+    gap: 12,
+    paddingVertical: 8,
+  },
+  pickDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: "rgba(255,255,255,0.1)",
+  },
+  pickDividerText: {
+    fontFamily: "Outfit_400Regular",
+    fontSize: 12,
+    color: "rgba(255,255,255,0.3)",
   },
   actionBtn: {
     marginHorizontal: 20,
@@ -322,9 +413,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  actionBtnDisabled: {
-    opacity: 0.6,
-  },
+  actionBtnDisabled: { opacity: 0.6 },
   actionBtnText: {
     fontFamily: "Outfit_700Bold",
     fontSize: 16,
