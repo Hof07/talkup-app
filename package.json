@@ -21,9 +21,7 @@
     "@react-navigation/native": "^7.1.33",
     "@supabase/supabase-js": "^2.99.3",
     "crypto-js": "^4.2.0",
-    "expo": "~55.0.9",
-    "expo-av": "^16.0.8",
-    "expo-blur": "~55.0.10",
+
     "expo": "~55.0.14",
     "expo-av": "^16.0.8",
     "expo-blur": "~55.0.14",
@@ -46,8 +44,9 @@
     "expo-symbols": "~55.0.7",
     "expo-system-ui": "~55.0.15",
     "expo-updates": "~55.0.20",
-    "expo-video": "~55.0.15",
+    "expo-video": "~55.0.16",
     "expo-web-browser": "~55.0.14",
+
     "lucide-react-native": "^0.577.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
