@@ -18,6 +18,40 @@ const PAGE_SIZE = 20;
 // ── In-memory cache per chat room ─────────────────────────────────────────────
 const messageCache = new Map<string, Message[]>();
 
+// ── AsyncStorage-backed persistent cache ──────────────────────────────────────
+const CHAT_CACHE_PREFIX = "chat_msgs_";
+const MAX_CACHED_MESSAGES = 50; // Keep last 50 messages per chat in storage
+
+const persistMessagesToStorage = async (
+  cacheKey: string,
+  msgs: Message[]
+): Promise<void> => {
+  try {
+    // Only persist the last N messages, skip temp messages
+    const toPersist = msgs
+      .filter((m) => !m.is_temp)
+      .slice(-MAX_CACHED_MESSAGES);
+    await AsyncStorage.setItem(
+      CHAT_CACHE_PREFIX + cacheKey,
+      JSON.stringify(toPersist)
+    );
+  } catch (e) {
+    console.warn("[useChat] persist cache failed:", e);
+  }
+};
+
+const loadMessagesFromStorage = async (
+  cacheKey: string
+): Promise<Message[]> => {
+  try {
+    const raw = await AsyncStorage.getItem(CHAT_CACHE_PREFIX + cacheKey);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {
+    console.warn("[useChat] load cache failed:", e);
+  }
+  return [];
+};
+
 const dedupe = (msgs: Message[]) => {
   const seen = new Set<string>();
   return msgs.filter((m) => {
@@ -34,6 +68,8 @@ export const useChat = (friendId: string) => {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const oldestCreatedAt = useRef<string | null>(null);
   const isFetchingMore = useRef(false);
+  const markReadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingReadIds = useRef<Set<string>>(new Set());
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentUserId, setCurrentUserId] = useState("");
@@ -91,36 +127,58 @@ export const useChat = (friendId: string) => {
       setCurrentUserId(uid);
       chatKeyRef.current = generateChatKey(uid, friendId);
 
-      const { error } = await supabase.auth.setSession({
-        access_token: session.access_token,
-        refresh_token: session.refresh_token,
-      });
-      if (error) throw error;
-
-      // ── Load from cache instantly while fetching fresh data ──────────────
+      // ── Load from cache instantly (in-memory first, then AsyncStorage) ────
       const cacheKey = `${uid}_${friendId}`;
-      const cached = messageCache.get(cacheKey);
-      if (cached && cached.length > 0) {
-        setMessages(cached);
+      const memCached = messageCache.get(cacheKey);
+      if (memCached && memCached.length > 0) {
+        setMessages(memCached);
         setLoading(false);
+      } else {
+        // Load from persistent storage (AsyncStorage) — instant, no network
+        const storageCached = await loadMessagesFromStorage(cacheKey);
+        if (storageCached.length > 0) {
+          messageCache.set(cacheKey, storageCached);
+          setMessages(storageCached);
+          setLoading(false);
+        }
+      }
+
+      // ── Try to set session (may fail if offline) ──────────────────────────
+      try {
+        const { error } = await supabase.auth.setSession({
+          access_token: session.access_token,
+          refresh_token: session.refresh_token,
+        });
+        if (error) throw error;
+      } catch (sessionError) {
+        // If offline, still show cached messages — don't crash
+        console.warn("[useChat] session set failed (offline?):", sessionError);
+        setLoading(false);
+        // Still try to setup realtime (will connect when online)
+        setupRealtime(uid);
+        return uid;
       }
 
       // ── All fetches in parallel ───────────────────────────────────────────
-      await Promise.all([
-        supabase
-          .from("users")
-          .update({ last_seen: new Date().toISOString() })
-          .eq("id", uid),
+      try {
+        await Promise.all([
+          supabase
+            .from("users")
+            .update({ last_seen: new Date().toISOString() })
+            .eq("id", uid),
 
-        supabase
-          .from("users")
-          .select("last_seen")
-          .eq("id", friendId)
-          .single()
-          .then(({ data }) => setFriendLastSeen(data?.last_seen || null)),
+          supabase
+            .from("users")
+            .select("last_seen")
+            .eq("id", friendId)
+            .single()
+            .then(({ data }) => setFriendLastSeen(data?.last_seen || null)),
 
-        loadMessages(uid, true),
-      ]);
+          loadMessages(uid, true),
+        ]);
+      } catch (fetchError) {
+        console.warn("[useChat] data fetch failed (offline?):", fetchError);
+      }
 
       setupRealtime(uid);
       setLoading(false);
@@ -129,6 +187,29 @@ export const useChat = (friendId: string) => {
       console.error(e.message);
       setLoading(false);
     }
+  };
+
+  // ── Batched mark-as-read: collects IDs and flushes in one update ──────────
+  const flushMarkAsRead = async () => {
+    const ids = Array.from(pendingReadIds.current);
+    if (ids.length === 0) return;
+    pendingReadIds.current.clear();
+
+    try {
+      await supabase
+        .from("messages")
+        .update({ is_read: true })
+        .in("id", ids);
+    } catch (e) {
+      console.warn("[useChat] mark-as-read failed:", e);
+    }
+  };
+
+  const scheduleMarkAsRead = (msgId: string) => {
+    pendingReadIds.current.add(msgId);
+    if (markReadTimer.current) clearTimeout(markReadTimer.current);
+    // Debounce 150ms so rapid incoming messages get batched into one update
+    markReadTimer.current = setTimeout(() => flushMarkAsRead(), 150);
   };
 
   const loadMessages = async (uid: string, isInit = false) => {
@@ -161,13 +242,25 @@ export const useChat = (friendId: string) => {
 
     setMessages(deduped);
 
-    supabase
-      .from("messages")
-      .update({ is_read: true })
-      .eq("sender_id", friendId)
-      .eq("receiver_id", uid)
-      .eq("is_read", false)
-      .then(() => {});
+    // Persist to AsyncStorage for offline access
+    persistMessagesToStorage(cacheKey, deduped);
+
+    // Collect all unread message IDs from friend and mark them as read in one batch
+    const unreadFromFriend = filtered.filter(
+      (m) => m.sender_id === friendId && m.receiver_id === uid && !m.is_read
+    );
+    if (unreadFromFriend.length > 0) {
+      const unreadIds = unreadFromFriend.map((m) => m.id);
+      // Update them all at once for consistency — no race condition
+      try {
+        await supabase
+          .from("messages")
+          .update({ is_read: true })
+          .in("id", unreadIds);
+      } catch (e) {
+        console.warn("[useChat] bulk mark-as-read failed:", e);
+      }
+    }
   };
 
   const loadMoreMessages = async () => {
@@ -248,7 +341,6 @@ export const useChat = (friendId: string) => {
           if (!relevant) return;
           if ((msg.deleted_for || []).includes(uid)) return;
           const dec = decryptMsg(msg);
-          // FIX: removed dedupe() from here — not needed for single new message
           setMessages((prev) => {
             // Remove matching temp message
             const withoutTemp = prev.filter(
@@ -261,14 +353,13 @@ export const useChat = (friendId: string) => {
             );
             // Skip if already exists
             if (withoutTemp.find((m) => m.id === dec.id)) return withoutTemp;
-            return [...withoutTemp, dec];
+            // Add the message with is_read already set to true locally
+            // (we are viewing this chat, so it's seen immediately)
+            return [...withoutTemp, { ...dec, is_read: true }];
           });
-          // Mark as read
-          supabase
-            .from("messages")
-            .update({ is_read: true })
-            .eq("id", msg.id)
-            .then(() => {});
+          // Mark as read via batched update — prevents race when multiple
+          // messages arrive quickly (fixes: 2 msgs sent, 1 unseen / 2nd seen)
+          scheduleMarkAsRead(msg.id);
         }
       )
       // ── FIX: filter UPDATE to only messages involving current user ────────
@@ -320,6 +411,11 @@ export const useChat = (friendId: string) => {
           const updated = payload.new as Message;
           const relevant = updated.receiver_id === friendId;
           if (!relevant) return;
+          // If YOU deleted this message "for me", keep it hidden
+          if ((updated.deleted_for || []).includes(uid)) {
+            setMessages((prev) => prev.filter((m) => m.id !== updated.id));
+            return;
+          }
           setMessages((prev) =>
             prev.map((m) =>
               m.id === updated.id
@@ -378,6 +474,7 @@ export const useChat = (friendId: string) => {
     broadcastStopTyping();
     setSending(true);
     const tempId = `temp_${Date.now()}`;
+    const now = new Date().toISOString();
 
     setMessages((prev) => [
       ...prev,
@@ -386,7 +483,7 @@ export const useChat = (friendId: string) => {
         sender_id: uid,
         receiver_id: friendId,
         content: plainText,
-        created_at: new Date().toISOString(),
+        created_at: now,
         is_read: false,
         is_temp: true,
         message_type: messageType as Message["message_type"],
@@ -400,42 +497,55 @@ export const useChat = (friendId: string) => {
       /^[\p{Emoji}\p{Emoji_Presentation}\s]+$/u.test(plainText.trim());
     const skipEncrypt = messageType === "gift" || isPlainUrl || isPureEmoji;
 
-    const { data, error } = await supabase
-      .from("messages")
-      .insert([
-        {
-          sender_id: uid,
-          receiver_id: friendId,
-          content: skipEncrypt
-            ? plainText
-            : encryptMessage(plainText, chatKeyRef.current),
-          is_read: false,
-          message_type: messageType,
-          reply_to: replyTo || null,
-        },
-      ])
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from("messages")
+        .insert([
+          {
+            sender_id: uid,
+            receiver_id: friendId,
+            content: skipEncrypt
+              ? plainText
+              : encryptMessage(plainText, chatKeyRef.current),
+            is_read: false,
+            message_type: messageType,
+            reply_to: replyTo || null,
+          },
+        ])
+        .select()
+        .single();
 
-    if (error) {
+      if (error) {
+        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        Alert.alert("Failed to send", error.message);
+        setSending(false);
+        return { tempId, error };
+      }
+
+      if (data) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId
+              ? {
+                  ...data,
+                  content: plainText,
+                  is_read: false,
+                  is_temp: false,
+                  message_type: messageType as Message["message_type"],
+                  reply_to: replyTo || null,
+                }
+              : m
+          )
+        );
+      }
+      setSending(false);
+      return { tempId, error: null };
+    } catch (e: any) {
       setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      Alert.alert("Failed to send", error.message);
-    } else if (data) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId
-            ? {
-                ...data,
-                content: plainText,
-                is_temp: false,
-                reply_to: replyTo || null,
-              }
-            : m
-        )
-      );
+      Alert.alert("Failed to send", e.message || "Something went wrong");
+      setSending(false);
+      return { tempId, error: e };
     }
-    setSending(false);
-    return { tempId, error };
   };
 
   const uploadImageFile = async (
@@ -585,6 +695,7 @@ export const useChat = (friendId: string) => {
   const deleteMessage = async (msg: Message, forEveryone: boolean) => {
     const uid = currentUserIdRef.current;
     if (forEveryone) {
+      // Instantly update UI to show deleted state
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msg.id
@@ -596,19 +707,70 @@ export const useChat = (friendId: string) => {
             : m
         )
       );
-      supabase
+      // Also update the cache
+      const cacheKey = `${uid}_${friendId}`;
+      const cached = messageCache.get(cacheKey);
+      if (cached) {
+        messageCache.set(
+          cacheKey,
+          cached.map((m) =>
+            m.id === msg.id
+              ? { ...m, deleted_for_everyone: true, content: "🚫 This message was deleted" }
+              : m
+          )
+        );
+      }
+      const { error } = await supabase
         .from("messages")
         .update({ deleted_for_everyone: true })
-        .eq("id", msg.id)
-        .then(() => {});
+        .eq("id", msg.id);
+      if (error) {
+        console.warn("[useChat] delete for everyone failed:", error);
+        // Revert on failure
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.id
+              ? { ...m, deleted_for_everyone: false, content: msg.content }
+              : m
+          )
+        );
+        Alert.alert("Delete failed", "Could not delete for everyone. Try again.");
+      }
     } else {
+      // "Delete for me" — only hides from YOUR side, friend still sees it
       const deletedFor = [...(msg.deleted_for || []), uid];
+      // Instantly remove from local state
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
-      supabase
+      // Update cache so it stays hidden even without a refresh
+      const cacheKey = `${uid}_${friendId}`;
+      const cached = messageCache.get(cacheKey);
+      if (cached) {
+        messageCache.set(
+          cacheKey,
+          cached.filter((m) => m.id !== msg.id)
+        );
+      }
+      // Persist to DB — only adds YOUR user ID to deleted_for array
+      // Friend's side is NOT affected at all
+      const { error } = await supabase
         .from("messages")
         .update({ deleted_for: deletedFor })
-        .eq("id", msg.id)
-        .then(() => {});
+        .eq("id", msg.id);
+      if (error) {
+        console.warn("[useChat] delete for me failed:", error);
+        // Revert — add message back
+        setMessages((prev) => {
+          const exists = prev.find((m) => m.id === msg.id);
+          if (exists) return prev;
+          // Re-insert at correct position by timestamp
+          const restored = [...prev, msg].sort(
+            (a, b) =>
+              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+          );
+          return restored;
+        });
+        Alert.alert("Delete failed", "Could not delete. Try again.");
+      }
     }
   };
 
@@ -630,6 +792,18 @@ export const useChat = (friendId: string) => {
 
   const cleanup = () => {
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    if (markReadTimer.current) clearTimeout(markReadTimer.current);
+    // Flush any pending read receipts before leaving the chat
+    flushMarkAsRead();
+    // Persist current messages to AsyncStorage for next offline load
+    const uid = currentUserIdRef.current;
+    if (uid) {
+      const cacheKey = `${uid}_${friendId}`;
+      const currentMsgs = messageCache.get(cacheKey);
+      if (currentMsgs) {
+        persistMessagesToStorage(cacheKey, currentMsgs);
+      }
+    }
     if (channelRef.current) supabase.removeChannel(channelRef.current);
   };
 

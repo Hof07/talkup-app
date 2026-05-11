@@ -1,11 +1,16 @@
 // ─── useHomeData.ts ───────────────────────────────────────────────────────────
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { router, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Friend, FriendRequest, TALKUP_USER_ID } from "./types";
 import * as api from "./api";
 import * as hidden from "./Hiddenchats";
+
+// ── AsyncStorage cache keys ──────────────────────────────────────────────────
+const CACHE_FRIENDS = "cache_friends_list";
+const CACHE_REQUESTS = "cache_pending_requests";
+const CACHE_USER = "cache_current_user";
 
 export const useHomeData = () => {
   const [friends,         setFriends]         = useState<Friend[]>([]);
@@ -15,11 +20,54 @@ export const useHomeData = () => {
   const [currentUserId,   setCurrentUserId]   = useState("");
   const [loading,         setLoading]         = useState(true);
   const [refreshing,      setRefreshing]      = useState(false);
+  const cacheLoaded = useRef(false);
 
-  // ── Load all data ────────────────────────────────────────────────────────────
+  // ── Load cached data from AsyncStorage (instant, no network) ──────────────
+  const loadFromCache = useCallback(async () => {
+    try {
+      const [friendsStr, requestsStr, userStr] = await Promise.all([
+        AsyncStorage.getItem(CACHE_FRIENDS),
+        AsyncStorage.getItem(CACHE_REQUESTS),
+        AsyncStorage.getItem(CACHE_USER),
+      ]);
+
+      if (friendsStr) {
+        const cached: Friend[] = JSON.parse(friendsStr);
+        setFriends(cached);
+      }
+      if (requestsStr) {
+        const cached: FriendRequest[] = JSON.parse(requestsStr);
+        setPendingRequests(cached);
+      }
+      if (userStr) {
+        setCurrentUser(JSON.parse(userStr));
+      }
+      cacheLoaded.current = true;
+    } catch (e) {
+      console.warn("[useHomeData] cache load failed:", e);
+    }
+  }, []);
+
+  // ── Save data to AsyncStorage cache ───────────────────────────────────────
+  const saveToCache = useCallback(
+    async (friends: Friend[], requests: FriendRequest[], user: any) => {
+      try {
+        await Promise.all([
+          AsyncStorage.setItem(CACHE_FRIENDS, JSON.stringify(friends)),
+          AsyncStorage.setItem(CACHE_REQUESTS, JSON.stringify(requests)),
+          AsyncStorage.setItem(CACHE_USER, JSON.stringify(user)),
+        ]);
+      } catch (e) {
+        console.warn("[useHomeData] cache save failed:", e);
+      }
+    },
+    []
+  );
+
+  // ── Load all data from server ─────────────────────────────────────────────
 
   const loadData = useCallback(async (isRefresh = false) => {
-    isRefresh ? setRefreshing(true) : setLoading(true);
+    isRefresh ? setRefreshing(true) : (cacheLoaded.current ? null : setLoading(true));
     try {
       const sessionStr = await AsyncStorage.getItem("userSession");
       if (!sessionStr) { router.replace("/signin"); return; }
@@ -46,28 +94,55 @@ export const useHomeData = () => {
       setCurrentUser(currentUser);
       setPendingRequests(pending);
       setFriends(friendsWithHidden);
+
+      // Save to cache for offline access
+      await saveToCache(friendsWithHidden, pending, currentUser);
     } catch (e) {
-      console.error(e);
+      console.warn("[useHomeData] network fetch failed (offline?):", e);
+      // If network fails and we haven't loaded cache yet, load it now
+      if (!cacheLoaded.current) {
+        await loadFromCache();
+      }
+      // Also set userId from session if possible
+      try {
+        const sessionStr = await AsyncStorage.getItem("userSession");
+        if (sessionStr) {
+          const session = JSON.parse(sessionStr);
+          setSessionData(session);
+          setCurrentUserId(session.user?.id || "");
+        }
+      } catch {}
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [loadFromCache, saveToCache]);
 
-  // ── Focus refresh ─────────────────────────────────────────────────────────────
+  // ── Focus refresh ─────────────────────────────────────────────────────────
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
+      // Load cached data instantly (no waiting for network)
+      if (!cacheLoaded.current) {
+        loadFromCache().then(() => setLoading(false));
+      }
+
+      // Also get userId from session immediately for routing
       AsyncStorage.getItem("userSession").then((s) => {
         if (!s) return;
         const session = JSON.parse(s);
-        api.updateLastSeen(session.user.id, session.access_token);
+        setSessionData(session);
+        setCurrentUserId(session.user?.id || "");
+        // Update last seen (fire-and-forget, won't fail if offline)
+        api.updateLastSeen(session.user.id, session.access_token).catch(() => {});
       });
-    }, [loadData])
+
+      // Then fetch fresh data from server in background
+      loadData();
+    }, [loadData, loadFromCache])
   );
 
-  // ── Friend request handlers ──────────────────────────────────────────────────
+  // ── Friend request handlers ──────────────────────────────────────────────
 
   const handleAccept = async (requestId: string) => {
     await api.acceptRequest(requestId, sessionData?.access_token);
@@ -80,34 +155,43 @@ export const useHomeData = () => {
     setPendingRequests((prev) => prev.filter((r) => r.id !== requestId));
   };
 
-  // ── Delete friend — TalkUp cannot be deleted ─────────────────────────────────
+  // ── Delete friend — TalkUp cannot be deleted ─────────────────────────────
 
   const handleDeleteFriend = async (friendId: string) => {
     if (friendId === TALKUP_USER_ID) return;   // guard
     try {
       await api.deleteFriend(currentUserId, friendId, sessionData?.access_token);
       await hidden.unhideChat(friendId);
-      setFriends((prev) => prev.filter((f) => f.id !== friendId));
+      setFriends((prev) => {
+        const updated = prev.filter((f) => f.id !== friendId);
+        // Also update cache
+        AsyncStorage.setItem(CACHE_FRIENDS, JSON.stringify(updated)).catch(() => {});
+        return updated;
+      });
     } catch (e) {
       console.error(e);
     }
   };
 
-  // ── Hide / unhide — TalkUp cannot be hidden ──────────────────────────────────
+  // ── Hide / unhide — TalkUp cannot be hidden ──────────────────────────────
 
   const handleHideChat = async (friendId: string) => {
     if (friendId === TALKUP_USER_ID) return;   // guard
     await hidden.hideChat(friendId);
-    setFriends((prev) =>
-      prev.map((f) => (f.id === friendId ? { ...f, isHidden: true } : f))
-    );
+    setFriends((prev) => {
+      const updated = prev.map((f) => (f.id === friendId ? { ...f, isHidden: true } : f));
+      AsyncStorage.setItem(CACHE_FRIENDS, JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
   };
 
   const handleUnhideChat = async (friendId: string) => {
     await hidden.unhideChat(friendId);
-    setFriends((prev) =>
-      prev.map((f) => (f.id === friendId ? { ...f, isHidden: false } : f))
-    );
+    setFriends((prev) => {
+      const updated = prev.map((f) => (f.id === friendId ? { ...f, isHidden: false } : f));
+      AsyncStorage.setItem(CACHE_FRIENDS, JSON.stringify(updated)).catch(() => {});
+      return updated;
+    });
   };
 
   return {

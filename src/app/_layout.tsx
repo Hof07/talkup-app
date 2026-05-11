@@ -24,31 +24,46 @@ const Layout = forwardRef<View>((props, ref) => {
             const refreshToken = session?.refresh_token;
 
             if (refreshToken) {
-              // Try to refresh the session
-              const res = await fetch(
-                `${process.env.EXPO_PUBLIC_SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
-                {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
-                  },
-                  body: JSON.stringify({ refresh_token: refreshToken }),
+              try {
+                // Try to refresh the session (requires network)
+                const res = await fetch(
+                  `${process.env.EXPO_PUBLIC_SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`,
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      apikey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!,
+                    },
+                    body: JSON.stringify({ refresh_token: refreshToken }),
+                  }
+                );
+
+                const data = await res.json();
+
+                if (res.ok && data.access_token) {
+                  // Save refreshed session permanently
+                  await AsyncStorage.setItem(
+                    "userSession",
+                    JSON.stringify(data)
+                  );
+                  isLoggedIn = true;
+                } else {
+                  // Token expired server-side — still keep user logged in
+                  // with cached session. Next API call will fail gracefully.
+                  // Only explicit logout should clear the session.
+                  isLoggedIn = true;
                 }
-              );
-
-              const data = await res.json();
-
-              if (res.ok && data.access_token) {
-                // Save refreshed session permanently
-                await AsyncStorage.setItem("userSession", JSON.stringify(data));
+              } catch {
+                // Network error (offline) — user stays logged in with
+                // cached data. Don't clear session just because of no internet.
                 isLoggedIn = true;
-              } else {
-                // Refresh failed — clear session
-                await AsyncStorage.removeItem("userSession");
               }
+            } else {
+              // Has session but no refresh token — still treat as logged in
+              isLoggedIn = true;
             }
           } catch {
+            // Corrupted session JSON — clear it
             await AsyncStorage.removeItem("userSession");
           }
         }
@@ -67,10 +82,14 @@ const Layout = forwardRef<View>((props, ref) => {
           }
         }, 2000);
       } catch {
+        // If even reading AsyncStorage fails, check if we have a session
+        const fallback = await AsyncStorage.getItem("userSession").catch(
+          () => null
+        );
         setTimeout(() => {
           setShowSplash(false);
           setIsReady(true);
-          router.replace("/signin");
+          router.replace(fallback ? "/home" : "/signin");
         }, 2000);
       }
     };
