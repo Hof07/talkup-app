@@ -50,22 +50,23 @@ export const useChat = (friendId: string) => {
       msg.message_type === "image" ||
       msg.message_type === "image_group" ||
       msg.message_type === "gift"
-    ) return true;
-    // plain URL (image sent as text)
+    )
+      return true;
     if (
       typeof msg.content === "string" &&
       (msg.content.startsWith("http") || msg.content.startsWith("file://"))
-    ) return true;
-    // pure emoji — no letters or numbers
+    )
+      return true;
     if (
       typeof msg.content === "string" &&
       /^[\p{Emoji}\p{Emoji_Presentation}\s]+$/u.test(msg.content.trim())
-    ) return true;
+    )
+      return true;
     return false;
   };
+
   const decryptMsg = (msg: Message): Message => {
-    if (msg.deleted_for_everyone)
-      return { ...msg, content: "__deleted__" };
+    if (msg.deleted_for_everyone) return { ...msg, content: "__deleted__" };
     if (shouldSkipEncryption(msg)) return msg;
     try {
       return {
@@ -76,6 +77,7 @@ export const useChat = (friendId: string) => {
       return msg;
     }
   };
+
   const init = async () => {
     try {
       const sessionStr = await AsyncStorage.getItem("userSession");
@@ -104,14 +106,12 @@ export const useChat = (friendId: string) => {
       }
 
       // ── All fetches in parallel ───────────────────────────────────────────
-      const [, , messagesResult] = await Promise.all([
-        // update own last_seen
+      await Promise.all([
         supabase
           .from("users")
           .update({ last_seen: new Date().toISOString() })
           .eq("id", uid),
 
-        // fetch friend last_seen
         supabase
           .from("users")
           .select("last_seen")
@@ -119,7 +119,6 @@ export const useChat = (friendId: string) => {
           .single()
           .then(({ data }) => setFriendLastSeen(data?.last_seen || null)),
 
-        // fetch messages
         loadMessages(uid, true),
       ]);
 
@@ -157,20 +156,18 @@ export const useChat = (friendId: string) => {
 
     const deduped = dedupe(decrypted);
 
-    // ── Save to cache ─────────────────────────────────────────────────────
     const cacheKey = `${uid}_${friendId}`;
     messageCache.set(cacheKey, deduped);
 
     setMessages(deduped);
 
-    // ── Mark as read in background (don't await) ──────────────────────────
     supabase
       .from("messages")
       .update({ is_read: true })
       .eq("sender_id", friendId)
       .eq("receiver_id", uid)
       .eq("is_read", false)
-      .then(() => { });
+      .then(() => {});
   };
 
   const loadMoreMessages = async () => {
@@ -207,7 +204,6 @@ export const useChat = (friendId: string) => {
     setHasMore(filtered.length === PAGE_SIZE);
     setMessages((prev) => {
       const merged = dedupe([...decrypted, ...prev]);
-      // update cache
       const cacheKey = `${uid}_${friendId}`;
       messageCache.set(cacheKey, merged);
       return merged;
@@ -218,6 +214,7 @@ export const useChat = (friendId: string) => {
     const channelName = `room_${[uid, friendId].sort().join("_")}`;
     channelRef.current = supabase
       .channel(channelName)
+      // ── Typing broadcasts (unchanged) ─────────────────────────────────────
       .on("broadcast", { event: "typing" }, (payload) => {
         if (payload.payload?.user_id === friendId) {
           setFriendIsTyping(true);
@@ -234,18 +231,26 @@ export const useChat = (friendId: string) => {
           if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         }
       })
+      // ── FIX: filter INSERT to only messages sent TO current user ──────────
+      // This prevents receiving every INSERT across all 4700+ messages
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "messages" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `receiver_id=eq.${uid}`,
+        },
         async (payload) => {
           const msg = payload.new as Message;
-          const relevant =
-            (msg.sender_id === uid && msg.receiver_id === friendId) ||
-            (msg.sender_id === friendId && msg.receiver_id === uid);
+          // Still verify it's from the right friend (filter only covers receiver)
+          const relevant = msg.sender_id === friendId;
           if (!relevant) return;
           if ((msg.deleted_for || []).includes(uid)) return;
           const dec = decryptMsg(msg);
+          // FIX: removed dedupe() from here — not needed for single new message
           setMessages((prev) => {
+            // Remove matching temp message
             const withoutTemp = prev.filter(
               (m) =>
                 !(
@@ -254,46 +259,79 @@ export const useChat = (friendId: string) => {
                   m.sender_id === dec.sender_id
                 )
             );
+            // Skip if already exists
             if (withoutTemp.find((m) => m.id === dec.id)) return withoutTemp;
-            const updated = dedupe([...withoutTemp, dec]);
-            // update cache
-            const cacheKey = `${uid}_${friendId}`;
-            messageCache.set(cacheKey, updated);
-            return updated;
+            return [...withoutTemp, dec];
           });
-          if (msg.receiver_id === uid)
-            supabase
-              .from("messages")
-              .update({ is_read: true })
-              .eq("id", msg.id)
-              .then(() => { });
+          // Mark as read
+          supabase
+            .from("messages")
+            .update({ is_read: true })
+            .eq("id", msg.id)
+            .then(() => {});
         }
       )
+      // ── FIX: filter UPDATE to only messages involving current user ────────
       .on(
         "postgres_changes",
-        { event: "UPDATE", schema: "public", table: "messages" },
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `receiver_id=eq.${uid}`,
+        },
         (payload) => {
           const updated = payload.new as Message;
-          const relevant =
-            (updated.sender_id === uid && updated.receiver_id === friendId) ||
-            (updated.sender_id === friendId && updated.receiver_id === uid);
+          const relevant = updated.sender_id === friendId;
           if (!relevant) return;
           if ((updated.deleted_for || []).includes(uid)) {
             setMessages((prev) => prev.filter((m) => m.id !== updated.id));
             return;
           }
+          // FIX: no dedupe needed for a simple map update
           setMessages((prev) =>
             prev.map((m) =>
               m.id === updated.id
                 ? {
-                  ...m,
-                  is_read: updated.is_read,
-                  reactions: updated.reactions,
-                  deleted_for_everyone: updated.deleted_for_everyone,
-                  content: updated.deleted_for_everyone
-                    ? "🚫 This message was deleted"
-                    : m.content,
-                }
+                    ...m,
+                    is_read: updated.is_read,
+                    reactions: updated.reactions,
+                    deleted_for_everyone: updated.deleted_for_everyone,
+                    content: updated.deleted_for_everyone
+                      ? "🚫 This message was deleted"
+                      : m.content,
+                  }
+                : m
+            )
+          );
+        }
+      )
+      // ── Also listen for updates on messages YOU sent (read receipts) ──────
+      // Separate subscription filtered by sender so you see "read" ticks update
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `sender_id=eq.${uid}`,
+        },
+        (payload) => {
+          const updated = payload.new as Message;
+          const relevant = updated.receiver_id === friendId;
+          if (!relevant) return;
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === updated.id
+                ? {
+                    ...m,
+                    is_read: updated.is_read,
+                    reactions: updated.reactions,
+                    deleted_for_everyone: updated.deleted_for_everyone,
+                    content: updated.deleted_for_everyone
+                      ? "🚫 This message was deleted"
+                      : m.content,
+                  }
                 : m
             )
           );
@@ -301,7 +339,11 @@ export const useChat = (friendId: string) => {
       )
       .on(
         "postgres_changes",
-        { event: "DELETE", schema: "public", table: "messages" },
+        {
+          event: "DELETE",
+          schema: "public",
+          table: "messages",
+        },
         (payload) => {
           setMessages((prev) => prev.filter((m) => m.id !== payload.old.id));
         }
@@ -327,36 +369,36 @@ export const useChat = (friendId: string) => {
     });
   };
 
-  const sendMessage = async (plainText: string, replyTo?: ReplyTo | null, messageType = "text") => {
+  const sendMessage = async (
+    plainText: string,
+    replyTo?: ReplyTo | null,
+    messageType = "text"
+  ) => {
     const uid = currentUserIdRef.current;
     broadcastStopTyping();
     setSending(true);
     const tempId = `temp_${Date.now()}`;
 
-    // ── Show message instantly ────────────────────────────────────────────
-    setMessages((prev) =>
-      dedupe([
-        ...prev,
-        {
-          id: tempId,
-          sender_id: uid,
-          receiver_id: friendId,
-          content: plainText,
-          created_at: new Date().toISOString(),
-          is_read: false,
-          is_temp: true,
-          message_type: messageType as Message["message_type"],
-          reply_to: replyTo || null,
-        },
-      ])
-    );
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        sender_id: uid,
+        receiver_id: friendId,
+        content: plainText,
+        created_at: new Date().toISOString(),
+        is_read: false,
+        is_temp: true,
+        message_type: messageType as Message["message_type"],
+        reply_to: replyTo || null,
+      },
+    ]);
+
     const isPlainUrl =
       plainText.startsWith("http") || plainText.startsWith("file://");
     const isPureEmoji =
       /^[\p{Emoji}\p{Emoji_Presentation}\s]+$/u.test(plainText.trim());
-    const skipEncrypt =
-      messageType === "gift" || isPlainUrl || isPureEmoji;
-
+    const skipEncrypt = messageType === "gift" || isPlainUrl || isPureEmoji;
 
     const { data, error } = await supabase
       .from("messages")
@@ -364,7 +406,9 @@ export const useChat = (friendId: string) => {
         {
           sender_id: uid,
           receiver_id: friendId,
-          content: skipEncrypt ? plainText : encryptMessage(plainText, chatKeyRef.current),
+          content: skipEncrypt
+            ? plainText
+            : encryptMessage(plainText, chatKeyRef.current),
           is_read: false,
           message_type: messageType,
           reply_to: replyTo || null,
@@ -378,17 +422,15 @@ export const useChat = (friendId: string) => {
       Alert.alert("Failed to send", error.message);
     } else if (data) {
       setMessages((prev) =>
-        dedupe(
-          prev.map((m) =>
-            m.id === tempId
-              ? {
+        prev.map((m) =>
+          m.id === tempId
+            ? {
                 ...data,
                 content: plainText,
                 is_temp: false,
                 reply_to: replyTo || null,
               }
-              : m
-          )
+            : m
         )
       );
     }
@@ -441,25 +483,23 @@ export const useChat = (friendId: string) => {
     const tempId = `temp_${Date.now()}`;
     const isMultiple = uris.length > 1;
 
-    setMessages((prev) =>
-      dedupe([
-        ...prev,
-        {
-          id: tempId,
-          sender_id: uid,
-          receiver_id: receiverId,
-          content: uris[0],
-          images: isMultiple ? uris : undefined,
-          created_at: new Date().toISOString(),
-          is_read: false,
-          is_temp: true,
-          message_type: (isMultiple ? "image_group" : "image") as
-            | "image"
-            | "image_group",
-          reply_to: replyTo || null,
-        },
-      ])
-    );
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        sender_id: uid,
+        receiver_id: receiverId,
+        content: uris[0],
+        images: isMultiple ? uris : undefined,
+        created_at: new Date().toISOString(),
+        is_read: false,
+        is_temp: true,
+        message_type: (isMultiple ? "image_group" : "image") as
+          | "image"
+          | "image_group",
+        reply_to: replyTo || null,
+      },
+    ]);
 
     try {
       const { data: sessionData } = await supabase.auth.getSession();
@@ -470,22 +510,22 @@ export const useChat = (friendId: string) => {
 
       const messagePayload = isMultiple
         ? {
-          sender_id: uid,
-          receiver_id: receiverId,
-          content: uploadedUrls[0],
-          images: uploadedUrls,
-          message_type: "image_group",
-          is_read: false,
-          reply_to: replyTo || null,
-        }
+            sender_id: uid,
+            receiver_id: receiverId,
+            content: uploadedUrls[0],
+            images: uploadedUrls,
+            message_type: "image_group",
+            is_read: false,
+            reply_to: replyTo || null,
+          }
         : {
-          sender_id: uid,
-          receiver_id: receiverId,
-          content: uploadedUrls[0],
-          message_type: "image",
-          is_read: false,
-          reply_to: replyTo || null,
-        };
+            sender_id: uid,
+            receiver_id: receiverId,
+            content: uploadedUrls[0],
+            message_type: "image",
+            is_read: false,
+            reply_to: replyTo || null,
+          };
 
       const { data, error } = await supabase
         .from("messages")
@@ -498,10 +538,9 @@ export const useChat = (friendId: string) => {
         Alert.alert("Failed to send image", error.message);
       } else if (data) {
         setMessages((prev) =>
-          dedupe(
-            prev.map((m) =>
-              m.id === tempId
-                ? {
+          prev.map((m) =>
+            m.id === tempId
+              ? {
                   ...data,
                   content: uploadedUrls[0],
                   images: isMultiple ? uploadedUrls : undefined,
@@ -511,8 +550,7 @@ export const useChat = (friendId: string) => {
                     : "image") as "image" | "image_group",
                   reply_to: replyTo || null,
                 }
-                : m
-            )
+              : m
           )
         );
       }
@@ -532,7 +570,6 @@ export const useChat = (friendId: string) => {
       ? current.filter((r) => !(r.user_id === uid && r.emoji === emoji))
       : [...current.filter((r) => r.user_id !== uid), { emoji, user_id: uid }];
 
-    // ── Optimistic update ─────────────────────────────────────────────────
     setMessages((prev) =>
       prev.map((m) =>
         m.id === msg.id ? { ...m, reactions: newReactions } : m
@@ -542,7 +579,7 @@ export const useChat = (friendId: string) => {
       .from("messages")
       .update({ reactions: newReactions })
       .eq("id", msg.id)
-      .then(() => { });
+      .then(() => {});
   };
 
   const deleteMessage = async (msg: Message, forEveryone: boolean) => {
@@ -551,7 +588,11 @@ export const useChat = (friendId: string) => {
       setMessages((prev) =>
         prev.map((m) =>
           m.id === msg.id
-            ? { ...m, deleted_for_everyone: true, content: "🚫 This message was deleted" }
+            ? {
+                ...m,
+                deleted_for_everyone: true,
+                content: "🚫 This message was deleted",
+              }
             : m
         )
       );
@@ -559,7 +600,7 @@ export const useChat = (friendId: string) => {
         .from("messages")
         .update({ deleted_for_everyone: true })
         .eq("id", msg.id)
-        .then(() => { });
+        .then(() => {});
     } else {
       const deletedFor = [...(msg.deleted_for || []), uid];
       setMessages((prev) => prev.filter((m) => m.id !== msg.id));
@@ -567,7 +608,7 @@ export const useChat = (friendId: string) => {
         .from("messages")
         .update({ deleted_for: deletedFor })
         .eq("id", msg.id)
-        .then(() => { });
+        .then(() => {});
     }
   };
 
@@ -584,7 +625,7 @@ export const useChat = (friendId: string) => {
       .or(
         `and(sender_id.eq.${uid},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${uid})`
       )
-      .then(() => { });
+      .then(() => {});
   };
 
   const cleanup = () => {
