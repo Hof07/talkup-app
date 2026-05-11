@@ -27,7 +27,7 @@ import {
 } from "@expo-google-fonts/outfit";
 // import { supabase } from "@/lib/supabase.js";
 import { useAppTheme } from "../constants/ThemeContext";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 const IMAGE_DURATION = 5000;
