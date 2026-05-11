@@ -1,21 +1,11 @@
-<<<<<<< HEAD
 // ─── app/story/[id].tsx ───────────────────────────────────────────────────────
 // Story viewer screen — shows all stories for a given user_id
-import React, { useEffect, useRef, useState } from "react";
-=======
-
-
 import React, { useCallback, useEffect, useRef, useState } from "react";
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
 import {
   ActivityIndicator,
   Animated,
   Dimensions,
   Image,
-<<<<<<< HEAD
-  StyleSheet,
-  Text,
-=======
   Keyboard,
   KeyboardAvoidingView,
   PanResponder,
@@ -23,68 +13,32 @@ import {
   StyleSheet,
   Text,
   TextInput,
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
-<<<<<<< HEAD
-import { Video, ResizeMode } from "expo-av";
-=======
 import { useVideoPlayer, VideoView } from "expo-video";
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
 import { useFonts } from "expo-font";
 import {
   Outfit_400Regular,
   Outfit_600SemiBold,
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
-<<<<<<< HEAD
-// import { supabase } from "../lib/supabase"; // ← adjust if needed
-// import { useAppTheme } from "../constants/ThemeContext"; // ← adjust if needed
-import { supabase } from "../../lib/supabase.ts";
-import { useAppTheme } from "../constants/ThemeContext.tsx";
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
-
-=======
-import { supabase } from "../../lib/supabase";
+import { supabase } from "@/lib/supabase.js";
+import { useAppTheme } from "../constants/ThemeContext";
 
 const { width: SW, height: SH } = Dimensions.get("window");
 const IMAGE_DURATION = 5000;
 const VIDEO_DURATION = 15000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
 interface Story {
   id: string;
   media_url: string;
   media_type: "image" | "video";
   created_at: string;
   user_id: string;
-<<<<<<< HEAD
-  users: {
-    username: string;
-    avatar_url: string | null;
-  } | null;
-}
-
-const STORY_DURATION = 5000; // 5 seconds per image story
-
-export default function StoryViewer() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const { colors } = useAppTheme();
-
-  const [stories, setStories] = useState<Story[]>([]);
-  const [currentIndex, setCurrentIndex] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [paused, setPaused] = useState<boolean>(false);
-
-  const progressAnim = useRef(new Animated.Value(0)).current;
-  const progressAnimation = useRef<Animated.CompositeAnimation | null>(null);
-  const videoRef = useRef<Video>(null);
-=======
   users: { username: string; avatar_url: string | null } | null;
 }
 
@@ -268,7 +222,6 @@ export default function StoryViewer() {
   const progressAnimation = useRef<Animated.CompositeAnimation | null>(null);
   const mediaFade = useRef(new Animated.Value(1)).current;
   const containerY = useRef(new Animated.Value(0)).current;
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
 
   const [fontsLoaded] = useFonts({
     Outfit_400Regular,
@@ -276,20 +229,6 @@ export default function StoryViewer() {
     Outfit_600SemiBold,
   });
 
-<<<<<<< HEAD
-  useEffect(() => {
-    if (id) fetchStories(id as string);
-  }, [id]);
-
-  useEffect(() => {
-    if (stories.length > 0) {
-      markAsViewed(stories[currentIndex].id);
-      startProgress(stories[currentIndex].media_type === "video" ? 15000 : STORY_DURATION);
-    }
-  }, [currentIndex, stories]);
-
-  const fetchStories = async (userId: string): Promise<void> => {
-=======
   // ── Auth ──────────────────────────────────────────────────────────────────
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -320,7 +259,6 @@ export default function StoryViewer() {
     if (!stories.length || !stories[currentIndex]) return;
     const story = stories[currentIndex];
 
-    // Fade in new story
     mediaFade.setValue(0);
     Animated.timing(mediaFade, { toValue: 1, duration: 200, useNativeDriver: true }).start();
 
@@ -337,7 +275,6 @@ export default function StoryViewer() {
   }, [currentIndex, stories, currentUserId]);
 
   const fetchStories = async (userId: string) => {
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
     const now = new Date().toISOString();
     const { data } = await supabase
       .from("stories")
@@ -346,64 +283,6 @@ export default function StoryViewer() {
       .gte("expires_at", now)
       .order("created_at", { ascending: true });
 
-<<<<<<< HEAD
-    if (data) setStories(data as Story[]);
-    setLoading(false);
-  };
-
-  const markAsViewed = async (storyId: string): Promise<void> => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    await supabase.from("story_views").upsert({
-      story_id: storyId,
-      viewer_id: user.id,
-    });
-  };
-
-  const startProgress = (duration: number): void => {
-    progressAnim.setValue(0);
-    progressAnimation.current?.stop();
-    progressAnimation.current = Animated.timing(progressAnim, {
-      toValue: 1,
-      duration,
-      useNativeDriver: false,
-    });
-    progressAnimation.current.start(({ finished }) => {
-      if (finished) goNext();
-    });
-  };
-
-  const goNext = (): void => {
-    if (currentIndex < stories.length - 1) {
-      setCurrentIndex((prev) => prev + 1);
-    } else {
-      router.back();
-    }
-  };
-
-  const goPrev = (): void => {
-    if (currentIndex > 0) {
-      setCurrentIndex((prev) => prev - 1);
-    }
-  };
-
-  const handleLongPress = (): void => {
-    setPaused(true);
-    progressAnimation.current?.stop();
-  };
-
-  const handlePressOut = (): void => {
-    setPaused(false);
-    const current = stories[currentIndex];
-    if (current) {
-      startProgress(current.media_type === "video" ? 15000 : STORY_DURATION);
-    }
-  };
-
-  if (!fontsLoaded || loading) {
-    return (
-      <View style={styles.loadingContainer}>
-=======
     if (data) {
       const normalized: Story[] = (data as any[]).map((item) => ({
         ...item,
@@ -428,10 +307,9 @@ export default function StoryViewer() {
     }
   };
 
-  // ── BUG FIX: markAsViewed now safely handles unauthenticated state ────────
   const markAsViewed = async (storyId: string) => {
     const { data } = await supabase.auth.getUser();
-    if (!data?.user) return; // was crashing when user is null
+    if (!data?.user) return;
     await supabase
       .from("story_views")
       .upsert({ story_id: storyId, viewer_id: data.user.id });
@@ -494,23 +372,15 @@ export default function StoryViewer() {
   if (!fontsLoaded || loading) {
     return (
       <View style={styles.centered}>
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
         <ActivityIndicator color="#FFB800" size="large" />
       </View>
     );
   }
 
-<<<<<<< HEAD
-  if (stories.length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.noStoryText}>No stories available</Text>
-=======
   if (!stories.length) {
     return (
       <View style={styles.centered}>
         <Text style={styles.emptyText}>No stories available</Text>
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>Go Back</Text>
         </TouchableOpacity>
@@ -520,99 +390,6 @@ export default function StoryViewer() {
 
   const current = stories[currentIndex];
   const user = current.users;
-<<<<<<< HEAD
-  const timeAgo = getTimeAgo(current.created_at);
-
-  return (
-    <View style={styles.container}>
-      {/* ── Media ── */}
-      <TouchableWithoutFeedback
-        onLongPress={handleLongPress}
-        onPressOut={handlePressOut}
-      >
-        <View style={styles.mediaContainer}>
-          {current.media_type === "video" ? (
-            <Video
-              ref={videoRef}
-              source={{ uri: current.media_url }}
-              style={styles.media}
-              resizeMode={ResizeMode.COVER}
-              shouldPlay={!paused}
-              isLooping={false}
-              onPlaybackStatusUpdate={(status) => {
-                if (status.isLoaded && status.didJustFinish) goNext();
-              }}
-            />
-          ) : (
-            <Image
-              source={{ uri: current.media_url }}
-              style={styles.media}
-              resizeMode="cover"
-            />
-          )}
-        </View>
-      </TouchableWithoutFeedback>
-
-      {/* ── Progress bars ── */}
-      <View style={styles.progressRow}>
-        {stories.map((_, i) => (
-          <View key={i} style={styles.progressTrack}>
-            <Animated.View
-              style={[
-                styles.progressFill,
-                {
-                  width:
-                    i < currentIndex
-                      ? "100%"
-                      : i === currentIndex
-                      ? progressAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: ["0%", "100%"],
-                        })
-                      : "0%",
-                },
-              ]}
-            />
-          </View>
-        ))}
-      </View>
-
-      {/* ── Header ── */}
-      <View style={styles.header}>
-        <View style={styles.userInfo}>
-          {user?.avatar_url ? (
-            <Image
-              source={{ uri: user.avatar_url }}
-              style={styles.avatar}
-            />
-          ) : (
-            <View style={styles.avatarFallback}>
-              <Text style={styles.avatarText}>
-                {user?.username?.[0]?.toUpperCase() ?? "?"}
-              </Text>
-            </View>
-          )}
-          <View>
-            <Text style={styles.username}>{user?.username ?? "User"}</Text>
-            <Text style={styles.timeAgo}>{timeAgo}</Text>
-          </View>
-        </View>
-        <TouchableOpacity onPress={() => router.back()} style={styles.closeBtn}>
-          <Text style={styles.closeText}>✕</Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Tap left / right to navigate ── */}
-      <View style={styles.tapRow}>
-        <TouchableOpacity style={styles.tapZone} onPress={goPrev} />
-        <TouchableOpacity style={styles.tapZone} onPress={goNext} />
-      </View>
-    </View>
-  );
-}
-
-// ── Time helper ───────────────────────────────────────────────────────────────
-=======
 
   return (
     <KeyboardAvoidingView
@@ -702,7 +479,6 @@ export default function StoryViewer() {
           </View>
 
           <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-            {/* Mute toggle for video */}
             {current.media_type === "video" && (
               <TouchableOpacity
                 onPress={() => setMuted((m) => !m)}
@@ -727,7 +503,6 @@ export default function StoryViewer() {
 
         {/* ── Bottom bar ── */}
         {isOwnStory ? (
-          // Own story: show viewers
           <TouchableOpacity
             style={styles.viewerBar}
             onPress={() => {
@@ -742,41 +517,38 @@ export default function StoryViewer() {
             </Text>
             <Text style={styles.viewerBarChevron}>›</Text>
           </TouchableOpacity>
+        ) : !keyboardOpen ? (
+          <TouchableOpacity
+            style={styles.replyBarStub}
+            onPress={() => {
+              setPaused(true);
+              progressAnimation.current?.stop();
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.replyBarPlaceholder}>
+              Reply to {user?.username ?? "Story"}…
+            </Text>
+          </TouchableOpacity>
         ) : (
-          // Friend's story: reply bar
-          !keyboardOpen ? (
-            <TouchableOpacity
-              style={styles.replyBarStub}
-              onPress={() => {
-                setPaused(true);
-                progressAnimation.current?.stop();
+          <View style={styles.replyBarActive}>
+            <TextInput
+              value={replyText}
+              onChangeText={setReplyText}
+              placeholder={`Reply to ${user?.username ?? "Story"}…`}
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              style={styles.replyInput}
+              autoFocus
+              returnKeyType="send"
+              onSubmitEditing={() => {
+                setReplyText("");
+                Keyboard.dismiss();
               }}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.replyBarPlaceholder}>
-                Reply to {user?.username ?? "Story"}…
-              </Text>
+            />
+            <TouchableOpacity style={styles.sendBtn}>
+              <Text style={styles.sendBtnText}>Send</Text>
             </TouchableOpacity>
-          ) : (
-            <View style={styles.replyBarActive}>
-              <TextInput
-                value={replyText}
-                onChangeText={setReplyText}
-                placeholder={`Reply to ${user?.username ?? "Story"}…`}
-                placeholderTextColor="rgba(255,255,255,0.4)"
-                style={styles.replyInput}
-                autoFocus
-                returnKeyType="send"
-                onSubmitEditing={() => {
-                  setReplyText("");
-                  Keyboard.dismiss();
-                }}
-              />
-              <TouchableOpacity style={styles.sendBtn}>
-                <Text style={styles.sendBtnText}>Send</Text>
-              </TouchableOpacity>
-            </View>
-          )
+          </View>
         )}
       </Animated.View>
 
@@ -796,7 +568,6 @@ export default function StoryViewer() {
   );
 }
 
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
 function getTimeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -807,41 +578,13 @@ function getTimeAgo(dateStr: string): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
-<<<<<<< HEAD
-// ── Styles ────────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#000" },
-  loadingContainer: {
-=======
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
   centered: {
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
     flex: 1,
     backgroundColor: "#000",
     alignItems: "center",
     justifyContent: "center",
-<<<<<<< HEAD
-  },
-  noStoryText: {
-    color: "#fff",
-    fontFamily: "Outfit_400Regular",
-    fontSize: 16,
-    marginBottom: 16,
-  },
-  backBtn: {
-    backgroundColor: "#FFB800",
-    paddingHorizontal: 24,
-    paddingVertical: 10,
-    borderRadius: 50,
-  },
-  backBtnText: {
-    fontFamily: "Outfit_600SemiBold",
-    color: "#000",
-    fontSize: 14,
-  },
-  mediaContainer: {
-=======
     gap: 16,
   },
   emptyText: { color: "#fff", fontFamily: "Outfit_400Regular", fontSize: 16 },
@@ -853,16 +596,10 @@ const styles = StyleSheet.create({
   },
   backBtnText: { fontFamily: "Outfit_700Bold", color: "#000", fontSize: 14 },
   gradientTop: {
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-<<<<<<< HEAD
-    bottom: 0,
-  },
-  media: { width: SCREEN_WIDTH, height: SCREEN_HEIGHT },
-=======
     height: 160,
     backgroundColor: "rgba(0,0,0,0.45)",
   },
@@ -874,7 +611,6 @@ const styles = StyleSheet.create({
     height: 160,
     backgroundColor: "rgba(0,0,0,0.35)",
   },
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
   progressRow: {
     flexDirection: "row",
     position: "absolute",
@@ -882,20 +618,12 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     gap: 4,
-<<<<<<< HEAD
-    zIndex: 10,
-=======
     zIndex: 20,
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
   },
   progressTrack: {
     flex: 1,
     height: 2.5,
-<<<<<<< HEAD
-    backgroundColor: "rgba(255,255,255,0.4)",
-=======
     backgroundColor: "rgba(255,255,255,0.30)",
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
     borderRadius: 2,
     overflow: "hidden",
   },
@@ -906,22 +634,12 @@ const styles = StyleSheet.create({
   },
   header: {
     position: "absolute",
-<<<<<<< HEAD
-    top: 64,
-=======
     top: 66,
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
     left: 12,
     right: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-<<<<<<< HEAD
-    zIndex: 10,
-  },
-  userInfo: { flexDirection: "row", alignItems: "center", gap: 10 },
-  avatar: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: "#FFB800" },
-=======
     zIndex: 20,
   },
   userRow: { flexDirection: "row", alignItems: "center", gap: 10 },
@@ -932,7 +650,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#FFB800",
   },
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
   avatarFallback: {
     width: 40,
     height: 40,
@@ -941,13 +658,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-<<<<<<< HEAD
-  avatarText: { fontFamily: "Outfit_700Bold", fontSize: 16, color: "#000" },
-  username: { fontFamily: "Outfit_600SemiBold", fontSize: 14, color: "#fff" },
-  timeAgo: { fontFamily: "Outfit_400Regular", fontSize: 11, color: "rgba(255,255,255,0.7)" },
-  closeBtn: { padding: 8 },
-  closeText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
-=======
   avatarLetter: { fontFamily: "Outfit_700Bold", fontSize: 16, color: "#000" },
   username: { fontFamily: "Outfit_700Bold", fontSize: 14, color: "#fff" },
   timeAgo: {
@@ -964,25 +674,16 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   closeText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
   tapRow: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-<<<<<<< HEAD
-    bottom: 0,
-    flexDirection: "row",
-    zIndex: 5,
-  },
-  tapZone: { flex: 1 },
-=======
     bottom: 80,
     flexDirection: "row",
     zIndex: 10,
   },
   tapZone: { flex: 1 },
-  // Reply bar (stub — tappable placeholder)
   replyBarStub: {
     position: "absolute",
     bottom: 32,
@@ -1002,7 +703,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "rgba(255,255,255,0.5)",
   },
-  // Reply bar (active — input visible)
   replyBarActive: {
     position: "absolute",
     bottom: 12,
@@ -1036,7 +736,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#000",
   },
-  // Viewer bar (own stories)
   viewerBar: {
     position: "absolute",
     bottom: 32,
@@ -1063,5 +762,4 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: "rgba(255,255,255,0.5)",
   },
->>>>>>> d288638498b13133ec8ae72883f1ba5c9ce5d433
 });
