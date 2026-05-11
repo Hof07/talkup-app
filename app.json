@@ -4,12 +4,9 @@
     "slug": "talkup-app",
     "version": "1.0.0",
     "orientation": "portrait",
-
     "icon": "./assets/images/app-icon.png",
-
     "scheme": "chatapp",
     "userInterfaceStyle": "automatic",
-
     "ios": {
       "icon": "./assets/images/app-icon.png",
       "bundleIdentifier": "com.hof.talkupapp",
@@ -17,7 +14,6 @@
         "ITSAppUsesNonExemptEncryption": false
       }
     },
-
     "android": {
       "package": "com.hof.talkupapp",
       "adaptiveIcon": {
@@ -27,40 +23,37 @@
       },
       "predictiveBackGestureEnabled": false
     },
-
     "web": {
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-
     "plugins": [
-  "expo-router",
-  [
-    "expo-splash-screen",
-    {
-      "backgroundColor": "#000000",
-      "image": "./assets/images/splash-icon.png",
-      "imageWidth": 120
-    }
-  ]
-],
-
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#000000",
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 120
+        }
+      ],
+      "expo-image",
+      "expo-web-browser",
+      "expo-video"
+    ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
     },
-
     "extra": {
       "router": {},
       "eas": {
         "projectId": "392fb3ab-24c4-49f1-9a95-d5a04c7895b1"
       }
     },
-
     "runtimeVersion": {
       "policy": "appVersion"
     },
-
     "updates": {
       "url": "https://u.expo.dev/392fb3ab-24c4-49f1-9a95-d5a04c7895b1",
       "enabled": true,

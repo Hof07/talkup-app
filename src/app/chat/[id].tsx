@@ -25,7 +25,6 @@ import {
   Outfit_700Bold,
   Outfit_600SemiBold,
 } from "@expo-google-fonts/outfit";
-// import { SpecialMessagePicker } from "./components/SpecialMessagePicker";
 import { GiftMessageComposer } from "./components/GiftMessageComposer";
 import { Lock, X, ChevronLeft, ChevronRight } from "lucide-react-native";
 
@@ -196,7 +195,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const dotsMenuAnim = useRef(new Animated.Value(0)).current;
   const themeSheetAnim = useRef(new Animated.Value(0)).current;
   const typingBroadcastTimeout = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
+    null
   );
 
   // ── Scroll tracking ───────────────────────────────────────────────────────
@@ -217,7 +216,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   // ── DotsMenu state ────────────────────────────────────────────────────────
   const [isChatLocked, setIsChatLocked] = useState(false);
   const [disappearAfterHours, setDisappearAfterHours] = useState<number | null>(
-    null,
+    null
   );
   const [muteUntil, setMuteUntil] = useState<Date | null>(null);
 
@@ -228,10 +227,10 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const [forwardVisible, setForwardVisible] = useState(false);
   const [forwardMsg, setForwardMsg] = useState<Message | null>(null);
 
-  // ── Starred messages
+  // ── Starred messages ──────────────────────────────────────────────────────
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
 
-  // handle special msg ──────────────────────────────────────────────
+  // ── Special message picker ────────────────────────────────────────────────
   const [pickerVisible, setPickerVisible] = useState(false);
   const [composerVisible, setComposerVisible] = useState(false);
 
@@ -265,12 +264,14 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     Outfit_700Bold,
     Outfit_600SemiBold,
   });
+
   const handleGiftSend = async (message: string) => {
     setComposerVisible(false);
     userScrolledUp.current = false;
     await sendMessage(message, replyTo, "gift");
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
   };
+
   useEffect(() => {
     init();
     const showL = Keyboard.addListener(
@@ -280,14 +281,14 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         if (!userScrolledUp.current) {
           setTimeout(
             () => flatListRef.current?.scrollToEnd({ animated: true }),
-            100,
+            100
           );
         }
-      },
+      }
     );
     const hideL = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => setKeyboardHeight(0),
+      () => setKeyboardHeight(0)
     );
     return () => {
       showL.remove();
@@ -298,7 +299,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     };
   }, []);
 
-  // Load starred messages
   useEffect(() => {
     AsyncStorage.getItem(`starred_${id}`).then((raw) => {
       if (raw) setStarredIds(new Set(JSON.parse(raw)));
@@ -309,7 +309,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     if (friendIsTyping && !userScrolledUp.current) {
       setTimeout(
         () => flatListRef.current?.scrollToEnd({ animated: true }),
-        100,
+        100
       );
     }
   }, [friendIsTyping]);
@@ -333,7 +333,7 @@ const ChatScreen = forwardRef<View>((props, ref) => {
         clearTimeout(typingBroadcastTimeout.current);
       typingBroadcastTimeout.current = setTimeout(
         () => broadcastStopTyping(),
-        2000,
+        2000
       );
     } else {
       broadcastStopTyping();
@@ -415,11 +415,9 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   // ── DotsMenu handlers ─────────────────────────────────────────────────────
   const handleLockChat = () => {
     setIsChatLocked((prev) => !prev);
-    // TODO: wire up biometric / PIN logic here
   };
 
   const handleDisappearingMessages = () => {
-    // Cycle: off → 1h → 6h → 24h → off
     setDisappearAfterHours((prev) => {
       if (prev === null) return 1;
       if (prev === 1) return 6;
@@ -434,7 +432,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     if (isMuted) {
       setMuteUntil(null);
     } else {
-      // Mute for 1 hour by default
       const until = new Date(now.getTime() + 60 * 60 * 1000);
       setMuteUntil(until);
     }
@@ -464,7 +461,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
     setNewMessage("");
     setInputHeight(45);
     setReplyTo(null);
-    // User is sending — always scroll to their new message
     userScrolledUp.current = false;
     await sendMessage(text, currentReply);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
@@ -473,7 +469,6 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const handleImagePick = async () => {
     const currentReply = replyTo;
     setReplyTo(null);
-    // User is sending — always scroll to their new message
     userScrolledUp.current = false;
     await sendImage(id as string, currentReply);
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 300);
@@ -553,11 +548,13 @@ const ChatScreen = forwardRef<View>((props, ref) => {
   const headerBgColor = isImageTheme ? `${theme.headerBg}D0` : theme.headerBg;
   const e2eBgColor = isImageTheme ? `${theme.inputBarBg}BB` : theme.inputBarBg;
 
+  // ── FIX: only trigger loadMoreMessages once when near top ─────────────────
+  // Previously this called loadMoreMessages() on every scroll event near top,
+  // causing hammering. Now guarded by loadingMore + hasMore flags.
   const handleScroll = (e: any) => {
     const { layoutMeasurement, contentOffset, contentSize } = e.nativeEvent;
 
-    // load older messages when near top
-    if (contentOffset.y < 80) {
+    if (contentOffset.y < 80 && !loadingMore && hasMore) {
       loadMoreMessages();
     }
 
