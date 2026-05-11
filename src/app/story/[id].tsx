@@ -25,7 +25,6 @@ import {
   Outfit_600SemiBold,
   Outfit_700Bold,
 } from "@expo-google-fonts/outfit";
-// import { supabase } from "@/lib/supabase.js";
 import { useAppTheme } from "../constants/ThemeContext";
 import { supabase } from "../../lib/supabase";
 
