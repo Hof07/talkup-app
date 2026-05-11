@@ -18,6 +18,7 @@ import { ChatTheme } from "../../../lib/themes";
 import { StickerBubble } from "../StickerBubble";
 import { Message, Reaction, ReplyTo } from "../utils/types";
 import { GiftBubble } from "./GiftBubble";
+import { extractUrls, LinkPreviewBubble, RichText } from "./LinkPreviewBubble";
 
 const documentDirectory: string = (FileSystem as any).documentDirectory ?? "";
 const getInfoAsync = (FileSystem as any)
@@ -159,6 +160,11 @@ export function MessageBubble({
     !isSticker &&
     !isGift &&
     isEmojiOnly(item.content); // ← updated
+
+  // Link detection
+  const messageUrls = !isDeleted && !isImage && !isSticker && !isGift && !emojiOnly
+    ? extractUrls(item.content)
+    : [];
 
   const showDateLabel =
     index === 0 ||
@@ -648,18 +654,40 @@ export function MessageBubble({
                     ]}
                   >
                     {renderReplyQuote()}
-                    <Text
-                      style={[
-                        s.msgText,
-                        isDeleted
-                          ? s.deletedText
-                          : isMine
+                    {messageUrls.length > 0 && !isDeleted ? (
+                      <RichText
+                        text={item.content}
+                        textStyle={[
+                          s.msgText,
+                          isMine
                             ? { color: theme.myBubbleText }
                             : { color: theme.theirBubbleText },
-                      ]}
-                    >
-                      {item.content}
-                    </Text>
+                        ]}
+                        linkColor={isMine ? "#B3E5FC" : "#1E88E5"}
+                      />
+                    ) : (
+                      <Text
+                        style={[
+                          s.msgText,
+                          isDeleted
+                            ? s.deletedText
+                            : isMine
+                              ? { color: theme.myBubbleText }
+                              : { color: theme.theirBubbleText },
+                        ]}
+                      >
+                        {item.content}
+                      </Text>
+                    )}
+                    {/* Link Preview Cards */}
+                    {messageUrls.map((linkUrl, idx) => (
+                      <LinkPreviewBubble
+                        key={idx}
+                        url={linkUrl}
+                        isMine={isMine}
+                        theme={theme}
+                      />
+                    ))}
                     <View style={s.meta}>
                       <Text
                         style={[
